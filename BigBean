@@ -1317,7 +1317,7 @@ BuildUI = function()
 
     local claimFarmOptions, claimFarmIdMap = getAllFarmsForClaim()
 
-    local claimDropdown = AutoClaimSection:Dropdown("SelectFarmsToClaim", {Title = "Select Farms to Claim", Values = claimFarmOptions, Multi = true, Default = {}})
+    local claimDropdown = AutoClaimSection:Dropdown("SelectFarmsToClaim", {Title = "Select Farms to Auto-Claim", Values = claimFarmOptions, Multi = true, Default = {}})
     local AutoClaimFarm = AutoClaimSection:Toggle("AutoClaimFarms", {Title = "Auto Claim Farms" , Description = "Claim owned farms when they are ready.", Default = false, Callback = function(s) _G.AutoClaimFarms = s end})
 
     isFarmReady = function(farmId)
@@ -3857,7 +3857,8 @@ BuildUI = function()
             end
         end
     })
-    
+
+
     autoClaimAllChestsThread, originalIsInGroup = nil, nil
     ClaimSection:Toggle("AutoClaimAllChests", { Title = "Auto Claim All Chests", Default = false,
         Callback = function(enabled)
