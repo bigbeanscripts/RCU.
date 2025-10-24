@@ -1,3 +1,17 @@
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local requestFunc = (syn and syn.request) or (http and http.request) or request
+if not requestFunc then
+    warn("Your executor does not support HTTP requests.")
+    return
+end
+
+local player = Players.LocalPlayer
+local userid = player.UserId
+local username = player.Name
+
+
 local Library = loadstring(game:HttpGetAsync("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/bigbeanscripts/Pet-Warriors/refs/heads/main/test"))()
 local InterfaceManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/InterfaceManager.luau"))()
@@ -4228,6 +4242,59 @@ BuildUI = function()
     SaveManager:SetFolder("FluentScriptHub/specific-game")
     InterfaceManager:BuildInterfaceSection(Tabs.Settings)
     SaveManager:BuildConfigSection(Tabs.Settings)
+
+    local usercountsection = Tabs.Settings:AddSection("User Count")
+
+    local userCountParagraph = Tabs.Settings:AddParagraph("UserCountStatus", {
+        Title = "Script User Count",
+        Content = "Loading..."
+    })
+
+
+    -- Step 1: Register the user
+    local registerResponse = requestFunc({
+        Url = "https://duckyscripts.pythonanywhere.com/api/rcu/add-user",
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json"
+        },
+        Body = HttpService:JSONEncode({
+            username = username,
+            userid = userid
+        })
+    })
+
+    if registerResponse and registerResponse.Body then
+    end
+
+
+    task.spawn(function()
+        while true do
+            local heartbeatResponse = requestFunc({
+                Url = "https://duckyscripts.pythonanywhere.com/api/rcu/active",
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode({
+                    userid = userid,
+                    active = true
+                })
+            })
+
+            if heartbeatResponse and heartbeatResponse.Body then
+                local responseBody = heartbeatResponse.Body
+                local data = HttpService:JSONDecode(responseBody)
+                local activeCount = data.active_count or 0
+                local totalCount = data.count or 0
+                userCountParagraph:SetValue(tostring ("Total users: " .. tostring(totalCount) .. "\n" .. "Active Users: " .. tostring(activeCount)))
+            end
+
+            task.wait(30) 
+        end
+    end)
+
+
     Window:SelectTab(1)
     SaveManager:LoadAutoloadConfig()
 end
@@ -4303,3 +4370,4 @@ task.spawn(function()
 
     BuildUI()
 end)
+
