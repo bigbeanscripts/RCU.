@@ -1,0 +1,824 @@
+local Library = loadstring(game:HttpGetAsync("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/bigbeanscripts/Pet-Warriors/refs/heads/main/test"))()
+local InterfaceManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/InterfaceManager.luau"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/SenhorLDS/ProjectLDSHUB/refs/heads/main/Anti%20AFK"))()
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- Global variables for game services and controllers
+local Knit, ClickService, UpgradeService, DataController, Functions, Util, Values
+
+-- Global variables for UI window and tabs
+local Window, Tabs
+
+spawn(function()
+    while wait(30) do 
+        pcall(function() collectgarbage("collect") end)
+    end
+end)
+
+BuildUI = function()
+    -- Declare UI elements that need to be shared between sections
+    local mobDropdown, AutoHitToggle
+
+    local AutoClickSection = Tabs.Halloween:AddSection("Auto Click")
+
+    AutoClickSection:Toggle("AutoClick", {
+        Title = "Auto Click",
+        Description = "Automatically clicks for you - Extremely fast!",
+        Default = false,
+        Callback = function(Value)
+            _G.AutoClicking = Value
+            if Value then
+                task.spawn(function()
+                    while _G.AutoClicking do
+                        ClickService.click._re:FireServer()
+                        task.wait(0.001)
+                    end
+                end)
+            end
+        end
+    })
+    
+    local MiniChestsSection = Tabs.Halloween:AddSection("Mini Chests")
+    
+    local collectChestsThread = nil
+
+    MiniChestsSection:Toggle("CollectMiniChests", {
+        Title = "Collect Mini Chests",
+        Description = "Automatically collects the mini chests in the Halloween world.",
+        Default = false,
+        Callback = function(enabled)
+            if collectChestsThread then
+                task.cancel(collectChestsThread)
+                collectChestsThread = nil
+            end
+
+            if enabled then
+                collectChestsThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local chestsFolder = Workspace.Game.Maps:FindFirstChild("0Halloween") 
+                                and Workspace.Game.Maps["0Halloween"]:FindFirstChild("MiniChests")
+
+                            if chestsFolder then
+                                for _, chest in ipairs(chestsFolder:GetChildren()) do
+                                    local touchPart = chest:FindFirstChild("Touch")
+                                    local prompt = touchPart and touchPart:FindFirstChildOfClass("ProximityPrompt")
+
+                                    if prompt and prompt.Enabled then
+                                        fireproximityprompt(prompt)
+                                        task.wait(2)
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(5)
+                    end
+                end)
+            end
+        end
+    })
+
+    local HalloweenShopSection = Tabs.Halloween:AddSection("Halloween Shop")
+
+    local shopItemNames = {}
+    local shopItemMap = {}
+    local autoBuyShopThread = nil
+
+    pcall(function()
+        local HalloweenShopList = require(ReplicatedStorage.Shared.List.Halloween.HalloweenShop)
+        local itemsToSort = {}
+
+        for id, cost in pairs(HalloweenShopList) do
+            local displayName = string.format("%s (Cost: %s)", id, Functions.suffixes(cost))
+            table.insert(itemsToSort, { display = displayName, id = id, cost = cost })
+            shopItemMap[displayName] = { id = id, cost = cost }
+        end
+
+        table.sort(itemsToSort, function(a, b) return a.cost < b.cost end)
+
+        for _, itemData in ipairs(itemsToSort) do
+            table.insert(shopItemNames, itemData.display)
+        end
+    end)
+
+    local shopDropdown = HalloweenShopSection:Dropdown("SelectShopItems", {
+        Title = "Select Items to Auto Buy",
+        Values = shopItemNames,
+        Multi = true,
+        Searchable = true,
+        Default = {}
+    })
+
+    HalloweenShopSection:Toggle("AutoBuyShopItems", {
+        Title = "Auto Buy",
+        Description = "Automatically buys selected items you don't own and can afford.",
+        Default = false,
+        Callback = function(enabled)
+            if autoBuyShopThread then
+                task.cancel(autoBuyShopThread)
+                autoBuyShopThread = nil
+            end
+
+            if enabled then
+                autoBuyShopThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local selectedItems = shopDropdown.Value
+                            if not next(selectedItems) then return end
+
+                            local playerData = DataController:getData()
+                            local candyCornItem = Util.itemUtils.getItemFromName(playerData, "candyCorns")
+                            local myCandyCorns = candyCornItem and candyCornItem:getAmount() or 0
+                            local playerOwnedData = playerData.halloweenShop or {}
+
+                            for displayName, isSelected in pairs(selectedItems) do
+                                if isSelected then
+                                    local shopData = shopItemMap[displayName]
+                                    if not playerOwnedData[shopData.id] and myCandyCorns >= shopData.cost then
+                                        -- Corrected function name from buyHalloweenShop to buyShop
+                                        Knit.GetService("HalloweenService"):buyShop(shopData.id)
+                                        myCandyCorns = myCandyCorns - shopData.cost
+                                        task.wait(1)
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(5)
+                    end
+                end)
+            end
+        end
+    })
+    
+
+    local HalloweenRewardsSection = Tabs.Halloween:AddSection("Halloween Rewards")
+
+    local autoClaimRewardThread = nil
+
+    HalloweenRewardsSection:Toggle("AutoClaimHalloweenReward", {
+        Title = "Auto Claim Halloween Rewards",
+        Description = "Automatically claims rewards when you have Halloween Tickets.",
+        Default = false,
+        Callback = function(enabled)
+            if autoClaimRewardThread then
+                task.cancel(autoClaimRewardThread)
+                autoClaimRewardThread = nil
+            end
+
+            if enabled then
+                autoClaimRewardThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local playerData = DataController:getData()
+                            if not playerData then return end
+                            local halloweenTicketItem = Util.itemUtils.getItemFromName(playerData, "halloweenTicket")
+                            local ticketAmount = halloweenTicketItem and halloweenTicketItem:getAmount() or 0
+                            if ticketAmount > 0 then
+                                Knit.GetService("HalloweenService"):claimHalloweenReward()
+                            end
+                        end)
+                        task.wait(0.25)
+                    end
+                end)
+            end
+        end
+    })
+
+    local CursedChestSection = Tabs.Halloween:AddSection("Cursed Chest")
+    
+    local useOneKeyThread, useAllKeysThread = nil, nil
+
+    CursedChestSection:Toggle("AutoUseOneCursedKey", {
+        Title = "Use 1x Cursed Key",
+        Description = "Uses one Cursed Key (every second).",
+        Default = false,
+        Callback = function(enabled)
+            if useOneKeyThread then task.cancel(useOneKeyThread); useOneKeyThread = nil end
+            if enabled then
+                useOneKeyThread = task.spawn(function()
+                    while enabled do
+                        pcall(function() Knit.GetService("HalloweenService"):cursedChest() end)
+                        task.wait(1)
+                    end
+                end)
+            end
+        end
+    })
+
+    CursedChestSection:Toggle("AutoUseAllCursedKeys", {
+        Title = "Use All Cursed Keys",
+        Description = "Uses all available Cursed Keys every 5 seconds.",
+        Default = false,
+        Callback = function(enabled)
+            if useAllKeysThread then task.cancel(useAllKeysThread); useAllKeysThread = nil end
+            if enabled then
+                useAllKeysThread = task.spawn(function()
+                    while enabled do
+                        pcall(function() Knit.GetService("HalloweenService"):cursedChest(true) end)
+                        task.wait(5)
+                    end
+                end)
+            end
+        end
+    })
+
+    local HalloweenMobsSection = Tabs.Halloween:AddSection("Halloween Mobs")
+
+    local mobNames = {}
+    local MobsModule = nil
+    local autoHitThread = nil
+
+    pcall(function()
+        MobsModule = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+        for id, data in pairs(MobsModule) do table.insert(mobNames, id) end
+        table.sort(mobNames)
+    end)
+    
+    mobDropdown = HalloweenMobsSection:Dropdown("SelectMobs", {
+        Title = "Select Mobs to Target",
+        Values = mobNames,
+        Multi = true,
+        Searchable = true,
+        Default = {}
+    })
+
+    -- Corrected syntax and assignment
+    AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
+        Title = "Auto Hit",
+        Description = "Attacks selected mobs. If none are found, it will attack the weakest mob available.",
+        Default = false,
+        Callback = function(enabled)
+            if autoHitThread then
+                task.cancel(autoHitThread)
+                autoHitThread = nil
+            end
+
+            if enabled then
+                autoHitThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local selectedMobTypes = mobDropdown.Value
+                            local playerData = DataController:getData()
+                            local activeMobs = playerData and playerData.mobs
+                            if not activeMobs or not next(activeMobs) then return end
+                            
+                            local targetableMobs = {}
+                            for instanceId, mobData in pairs(activeMobs) do
+                                if selectedMobTypes[mobData.mobId] then
+                                    local baseStats = MobsModule[mobData.mobId]
+                                    if baseStats then
+                                        table.insert(targetableMobs, {id = instanceId, name = mobData.mobId, health = baseStats.hp - (mobData.damage or 0)})
+                                    end
+                                end
+                            end
+
+                            local target
+                            if #targetableMobs == 0 then
+                                local lowestHealth = math.huge
+                                for instanceId, mobData in pairs(activeMobs) do
+                                    local baseStats = MobsModule[mobData.mobId]
+                                    if baseStats then
+                                        local currentHealth = baseStats.hp - (mobData.damage or 0)
+                                        if currentHealth < lowestHealth then
+                                            lowestHealth = currentHealth
+                                            target = {id = instanceId, name = mobData.mobId, health = currentHealth}
+                                        end
+                                    end
+                                end
+                            else
+                                table.sort(targetableMobs, function(a, b) return a.health < b.health end)
+                                target = targetableMobs[1]
+                            end
+
+                            if target then
+                                Knit.GetService("HalloweenService").damage._re:FireServer(target.id)
+                            end
+                        end)
+                        task.wait(0.25)
+                    end
+                end)
+            end
+        end
+    })
+
+    local originalWeaponSpeed = Values.weaponSpeed
+    local HitSpeed = HalloweenMobsSection:Toggle("IncreaseSwordSpeed", {
+        Title = "Increase Sword Speed",
+        Description = "Makes your sword swing much faster. This works best when hitting mobs manually.",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                Values.weaponSpeed = function(...) return originalWeaponSpeed(...) / 10 end
+            else
+                Values.weaponSpeed = originalWeaponSpeed
+            end
+        end
+    })
+
+    local isAutoEquipSwordEnabled = false
+    local EquipBest = HalloweenMobsSection:Toggle("AutoEquipBestSword", {
+        Title = "Auto Equip Best Sword",
+        Description = "Automatically equips the best Halloween sword you own.",
+        Default = false,
+        Callback = function(enabled)
+            isAutoEquipSwordEnabled = enabled
+            if enabled then
+                task.spawn(function()
+                    while isAutoEquipSwordEnabled do
+                        pcall(function()
+                            local HalloweenEventItems = require(ReplicatedStorage.Shared.List.Items.HalloweenEvent)
+                            local playerData = DataController:getData()
+                            
+                            if not playerData.inventory or not playerData.inventory.halloweenEvent then return end
+                            local bestSwordIndex = -1
+                            local bestInventoryId = nil
+                            for inventoryId, itemData in pairs(playerData.inventory.halloweenEvent) do
+                                local itemStats = HalloweenEventItems[itemData.nm]
+                                if itemStats and itemStats.index and itemData.nm:lower():find("sword") then
+                                    if itemStats.index > bestSwordIndex then
+                                        bestSwordIndex = itemStats.index
+                                        bestInventoryId = inventoryId
+                                    end
+                                end
+                            end
+
+                            if not bestInventoryId then return end
+
+                            if not playerData.isHalloweenWeaponEquipped then
+                                Knit.GetService("InventoryService"):useItem(bestInventoryId)
+                            else
+                                local currentInventoryId = nil
+                                for inventoryId, itemData in pairs(playerData.inventory.halloweenEvent) do
+                                    if itemData.nm and itemData.nm:lower():find("sword") then
+                                        currentInventoryId = inventoryId
+                                        break
+                                    end
+                                end
+
+                                if currentInventoryId ~= bestInventoryId then
+                                     Knit.GetService("InventoryService"):useItem(bestInventoryId)
+                                end
+                            end
+                        end)
+                        task.wait(5)
+                    end
+                end)
+            end
+        end
+    })
+
+    local SwordUpgradesSection = Tabs.Halloween:AddSection("Sword Upgrades")
+
+    local autoUpgradeSwordThread, originalAutoHitSettings = nil, nil
+
+    -- Helper function to find raw item data from player's inventory
+    local function findRawItem(playerData, itemName)
+        if not playerData or not playerData.inventory then return nil end
+        for category, items in pairs(playerData.inventory) do
+            if type(items) == "table" then
+                for _, data in pairs(items) do
+                    if type(data) == "table" and data.nm == itemName then return data end
+                end
+            end
+        end
+        return nil
+    end
+    
+    -- Helper map to find which mobs drop which materials
+    local function generateItemSourceMap()
+        local sources = {}
+        local mobs = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+        for mobId, mobData in pairs(mobs) do
+            for _, reward in ipairs(mobData.rewards or {}) do
+                if reward.item and reward.item.nm then
+                    sources[reward.item.nm] = sources[reward.item.nm] or {}
+                    table.insert(sources[reward.item.nm], mobId)
+                end
+            end
+        end
+        return sources
+    end
+    local itemSourceMap = generateItemSourceMap()
+
+    -- The status paragraph that updates every second
+    local upgradeStatusParagraph = SwordUpgradesSection:Paragraph("UpgradeStatus", {
+        Title = "Upgrade Progress",
+        Content = "Loading...",
+        TitleAlignment = "Left"
+    })
+
+    -- Background task to keep the status paragraph updated
+    task.spawn(function()
+        while true do
+            pcall(function()
+                local playerData = DataController:getData()
+                if not playerData then return end
+
+                local HalloweenItems = require(ReplicatedStorage.Shared.List.Items.HalloweenEvent)
+                local WeaponUpgrader = require(ReplicatedStorage.Shared.List.Halloween.WeaponUpgrader)
+
+                -- Find current and next weapon
+                local currentWeaponIndex, currentWeaponName = -1, "None"
+                for _, itemData in pairs(playerData.inventory.halloweenEvent or {}) do
+                    local itemStats = HalloweenItems[itemData.nm]
+                    if itemStats and itemStats.index and itemStats.index > currentWeaponIndex then
+                        currentWeaponIndex = itemStats.index
+                        currentWeaponName = itemStats.name
+                    end
+                end
+
+                local nextWeaponName = nil
+                for name, data in pairs(HalloweenItems) do
+                    if data.index and data.index == currentWeaponIndex + 1 then
+                        nextWeaponName = name; break
+                    end
+                end
+                
+                local contentLines = {"Current: " .. currentWeaponName}
+                if not nextWeaponName then
+                    table.insert(contentLines, "\n🎉 You have the BEST weapon!")
+                else
+                    local recipe = WeaponUpgrader[nextWeaponName]
+                    table.insert(contentLines, "Next: " .. HalloweenItems[nextWeaponName].name .. "\n")
+                    
+                    for _, reqItem in ipairs(recipe.required) do
+                        local itemName = reqItem:getName()
+                        local needed = reqItem:getAmount()
+                        local current = (findRawItem(playerData, itemName) or {am=0}).am
+                        local status = (current >= needed) and "✅" or "❌"
+                        table.insert(contentLines, string.format("%s %s: %s / %s", status, itemName, Functions.suffixes(current), Functions.suffixes(needed)))
+                    end
+                end
+                upgradeStatusParagraph:SetValue(table.concat(contentLines, "\n"))
+            end)
+            task.wait(1)
+        end
+    end)
+
+    -- The Auto Upgrade toggle
+    SwordUpgradesSection:Toggle("AutoUpgradeSword", {
+        Title = "Auto Upgrade Sword",
+        Description = "Automatically upgrades your sword and farms missing materials.",
+        Default = false,
+        Callback = function(enabled)
+            if autoUpgradeSwordThread then task.cancel(autoUpgradeSwordThread); autoUpgradeSwordThread = nil end
+
+            if enabled then
+                originalAutoHitSettings = { selectedMobs = mobDropdown.Value, autoHitState = AutoHitToggle.Value, EquipBestState = EquipBest.Value, HitSpeedState = HitSpeed.Value }
+                
+                autoUpgradeSwordThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local playerData = DataController:getData()
+                            local HalloweenItems = require(ReplicatedStorage.Shared.List.Items.HalloweenEvent)
+                            local WeaponUpgrader = require(ReplicatedStorage.Shared.List.Halloween.WeaponUpgrader)
+                            local MobsModule = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+
+                            -- Find current and next weapon
+                            local currentWeaponIndex = -1
+                            for _, itemData in pairs(playerData.inventory.halloweenEvent or {}) do
+                                local itemStats = HalloweenItems[itemData.nm]
+                                if itemStats and itemStats.index and itemStats.index > currentWeaponIndex then currentWeaponIndex = itemStats.index end
+                            end
+                            local nextWeaponName = nil
+                            for name, data in pairs(HalloweenItems) do
+                                if data.index and data.index == currentWeaponIndex + 1 then nextWeaponName = name; break end
+                            end
+                            if not nextWeaponName then return end -- Max level
+
+                            -- Check requirements
+                            local canAfford, missingMaterials = true, {}
+                            for _, reqItem in ipairs(WeaponUpgrader[nextWeaponName].required) do
+                                local itemName, needed = reqItem:getName(), reqItem:getAmount()
+                                if (findRawItem(playerData, itemName) or {am=0}).am < needed then
+                                    canAfford = false
+                                    table.insert(missingMaterials, itemName)
+                                end
+                            end
+
+                            if canAfford then
+                                Knit.GetService("HalloweenWeaponService"):upgradeWeapon()
+                                task.wait(2)
+                            else
+                                -- Farming logic
+                                local mobsToFarm = {}
+                                if #missingMaterials == 1 and missingMaterials[1] == "candyCorns" then
+                                    -- Special case: Only need candy, so farm the best mob
+                                    local bestSwordInfo, bestIndex = nil, -1
+                                    for _, itemData in pairs(playerData.inventory.halloweenEvent) do
+                                        local itemStats = HalloweenItems[itemData.nm]
+                                        if itemStats and itemStats.index and itemStats.index > bestIndex then bestIndex, bestSwordInfo = itemStats.index, itemStats end
+                                    end
+                                    if bestSwordInfo then
+                                        local damageLimit = bestSwordInfo.multiplier * 25
+                                        local viableTargets = {}
+                                        for mobId, mobData in pairs(MobsModule) do
+                                            if mobData.hp <= damageLimit then table.insert(viableTargets, mobData) end
+                                        end
+                                        if #viableTargets > 0 then
+                                            table.sort(viableTargets, function(a,b) return a.hp > b.hp end)
+                                            mobsToFarm[MobsModule[viableTargets[1].name].name:lower()] = true
+                                        end
+                                    end
+                                else
+                                    -- Farm specific mobs for other materials
+                                    for _, material in ipairs(missingMaterials) do
+                                        if itemSourceMap[material] then
+                                            for _, mobName in ipairs(itemSourceMap[material]) do
+                                                mobsToFarm[mobName:lower()] = true
+                                            end
+                                        end
+                                    end
+                                end
+
+                                -- Update UI
+                                local newSelection = {}
+                                for mobId, _ in pairs(mobsToFarm) do
+                                    for _, mobValue in ipairs(mobDropdown.Values) do
+                                        if mobValue:lower() == mobId:lower() then newSelection[mobValue] = true end
+                                    end
+                                end
+                                mobDropdown:SetValue(newSelection)
+                                HitSpeed:SetValue(next(newSelection) ~= nil)
+                                EquipBest:SetValue(next(newSelection) ~= nil)
+                                AutoHitToggle:SetValue(next(newSelection) ~= nil)
+                            end
+                        end)
+                        task.wait(2)
+                    end
+                end)
+            else
+                if originalAutoHitSettings then
+                    mobDropdown:SetValue(originalAutoHitSettings.selectedMobs)
+                    AutoHitToggle:SetValue(originalAutoHitSettings.autoHitState)
+                    EquipBest:SetValue(originalAutoHitSettings.EquipBestState)
+                    HitSpeed:SetValue(originalAutoHitSettings.HitSpeedState)
+                    originalAutoHitSettings = nil
+                end
+            end
+        end
+    })
+
+    local HalloweenRebirthSection = Tabs.Halloween:AddSection("Halloween Rebirth")
+
+    local autoRebirthThread, originalAutoHitSettings = nil, nil
+
+    -- This function dynamically builds a map of ALL sources for each item.
+    local function generateItemSourceMap()
+        local mobs = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+        local itemSources = {}
+        for mobId, mobData in pairs(mobs) do
+            for _, reward in ipairs(mobData.rewards or {}) do
+                local item = reward.item
+                if item and item.cl == "halloweenEvent" and item.nm then
+                    itemSources[item.nm] = itemSources[item.nm] or {}
+                    table.insert(itemSources[item.nm], mobId)
+                end
+            end
+        end
+        return itemSources
+    end
+    local itemSourceMap = generateItemSourceMap()
+
+    local function findRawItem(playerData, itemName)
+        if not playerData or not playerData.inventory then return nil end
+        for category, items in pairs(playerData.inventory) do
+            if type(items) == "table" then
+                for _, data in pairs(items) do
+                    if type(data) == "table" and data.nm == itemName then return data end
+                end
+            end
+        end
+        return nil
+    end
+
+    local rebirthStatusParagraph = HalloweenRebirthSection:Paragraph("RebirthStatus", {
+        Title = "Next Rebirth Progress",
+        Content = "Loading...",
+        TitleAlignment = "Middle"
+    })
+
+    task.spawn(function()
+        while true do
+            pcall(function()
+                local playerData = DataController:getData()
+                if not playerData then return end
+                local HalloweenRebirths = require(ReplicatedStorage.Shared.List.Halloween.HalloweenRebirths)
+                local currentRebirths = playerData.halloweenRebirths or 0
+                local nextRebirthTier = currentRebirths + 1
+                local requirements = HalloweenRebirths[nextRebirthTier]
+                local contentLines = { "Current Rebirths: " .. currentRebirths }
+                if not requirements then
+                    table.insert(contentLines, "\n🎉 MAXIMUM REBIRTH LEVEL!")
+                else
+                    table.insert(contentLines, "Target: Rebirth " .. nextRebirthTier .. "\n")
+                    table.insert(contentLines, string.format("Candy Corns: %s / %s", Functions.suffixes((findRawItem(playerData, "candyCorns") or {am=0}).am), Functions.suffixes(requirements.candyCorns)))
+                    for _, reqItem in ipairs(requirements.required or {}) do
+                        table.insert(contentLines, string.format("%s: %s / %s", reqItem:getName(), Functions.suffixes((findRawItem(playerData, reqItem:getName()) or {am=0}).am), Functions.suffixes(reqItem:getAmount())))
+                    end
+                end
+                rebirthStatusParagraph:SetValue(table.concat(contentLines, "\n"))
+            end)
+            task.wait(3)
+        end
+    end)
+    
+    HalloweenRebirthSection:Toggle("AutoRebirth", {
+        Title = "Auto Rebirth",
+        Description = "WARNING: Resets Candy Corns. Will auto-farm materials needed for ALL future rebirths that come from mobs. It is reccomended to only use this when you have the best sword.",
+        Default = false,
+        Callback = function(enabled)
+            if autoRebirthThread then task.cancel(autoRebirthThread); autoRebirthThread = nil end
+
+            if enabled then
+                originalAutoHitSettings = { selectedMobs = mobDropdown.Value, autoHitState = AutoHitToggle.Value }
+                
+                autoRebirthThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local playerData = DataController:getData()
+                            local HalloweenRebirths = require(ReplicatedStorage.Shared.List.Halloween.HalloweenRebirths)
+                            local currentRebirths = playerData.halloweenRebirths or 0
+                            
+                            -- 1. Calculate TOTAL materials needed for ALL future rebirths
+                            local futureRequirements = {}
+                            for i = currentRebirths + 1, #HalloweenRebirths do
+                                for _, reqItem in ipairs(HalloweenRebirths[i].required or {}) do
+                                    local itemName = reqItem:getName()
+                                    futureRequirements[itemName] = (futureRequirements[itemName] or 0) + reqItem:getAmount()
+                                end
+                            end
+
+                            -- 2. Determine which mobs to farm based on deficits (25-hit limit REMOVED)
+                            local mobsToFarm = {}
+                            for itemName, totalNeeded in pairs(futureRequirements) do
+                                local playerAmount = (findRawItem(playerData, itemName) or {am=0}).am
+                                if playerAmount < totalNeeded and itemSourceMap[itemName] then
+                                    for _, mobId in ipairs(itemSourceMap[itemName]) do
+                                        mobsToFarm[mobId] = true
+                                    end
+                                end
+                            end
+                            
+                            -- 3. Update the Auto Hit UI based on the mobs we need to farm
+                            local finalTargets = {}
+                            for mobId, _ in pairs(mobsToFarm) do
+                                table.insert(finalTargets, mobId)
+                            end
+
+                            local newSelection = {}
+                            if #finalTargets > 0 then
+                                for _, mobIdValue in ipairs(mobDropdown.Values) do
+                                    for _, targetId in ipairs(finalTargets) do
+                                        if mobIdValue:lower() == targetId:lower() then
+                                            newSelection[mobIdValue] = true; break
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            mobDropdown:SetValue(newSelection)
+                            AutoHitToggle:SetValue(#finalTargets > 0) -- Enable if there are targets, disable if not
+                            EquipBest:SetValue(true) -- Equip best sword only if no farming targets
+
+                            -- 4. Check if CURRENT rebirth is affordable and execute
+                            local nextTier = currentRebirths + 1
+                            local currentRequirements = HalloweenRebirths[nextTier]
+                            if currentRequirements then
+                                local canAfford = true
+                                if (findRawItem(playerData, "candyCorns") or {am=0}).am < currentRequirements.candyCorns then canAfford = false end
+                                for _, reqItem in ipairs(currentRequirements.required or {}) do
+                                    if (findRawItem(playerData, reqItem:getName()) or {am=0}).am < reqItem:getAmount() then
+                                        canAfford = false; break
+                                    end
+                                end
+                                if canAfford then
+                                    Knit.GetService("HalloweenService"):halloweenRebirth()
+                                    task.wait(2)
+                                end
+                            end
+                        end)
+                        task.wait(3) -- Re-evaluate farming needs and rebirth status every 3 seconds
+                    end
+                end)
+            else
+                if originalAutoHitSettings then
+                    mobDropdown:SetValue(originalAutoHitSettings.selectedMobs)
+                    AutoHitToggle:SetValue(originalAutoHitSettings.autoHitState)
+                    originalAutoHitSettings = nil
+                end
+            end
+        end
+    })
+
+    local ForestUpgradesSection = Tabs.Halloween:AddSection("Forest Upgrades")
+
+    local forestUpgradeNames, ForestUpgradesModule, forestAutoUpgradeThread = {}, nil, nil
+
+    pcall(function()
+        ForestUpgradesModule = require(ReplicatedStorage.Shared.List.Halloween.ForestUpgrades)
+        for name, _ in pairs(ForestUpgradesModule) do table.insert(forestUpgradeNames, name) end
+        table.sort(forestUpgradeNames)
+    end)
+    
+    if #forestUpgradeNames > 0 then
+        local upgradesDropdown = ForestUpgradesSection:Dropdown("ForestUpgradesDropdown", {
+            Title = "Select Forest Upgrades",
+            Values = forestUpgradeNames,
+            Multi = true,
+            Searchable = true,
+            Default = {}
+        })
+
+        ForestUpgradesSection:Toggle("AutoUpgradeForest", {
+            Title = "Auto Upgrade",
+            Description = "Automatically buys selected upgrades when you can afford them.",
+            Default = false,
+            Callback = function(enabled)
+                if forestAutoUpgradeThread then task.cancel(forestAutoUpgradeThread); forestAutoUpgradeThread = nil end
+                if enabled then
+                    forestAutoUpgradeThread = task.spawn(function()
+                        while enabled do
+                            pcall(function()
+                                local selectedUpgrades = upgradesDropdown.Value
+                                if not next(selectedUpgrades) then return end
+                                local playerData = DataController:getData()
+                                for upgradeName, isSelected in pairs(selectedUpgrades) do
+                                    if not enabled then break end
+                                    if isSelected then
+                                        local currentLevel = (playerData.forestUpgrades and playerData.forestUpgrades[upgradeName]) or 0
+                                        local upgradeInfo = ForestUpgradesModule[upgradeName]
+                                        local nextUpgradeData = upgradeInfo and upgradeInfo.upgrades and upgradeInfo.upgrades[currentLevel + 1]
+                                        if nextUpgradeData then
+                                            local cost = nextUpgradeData.cost
+                                            local playerItem = Util.itemUtils.getItemFromName(playerData, cost:getName())
+                                            local playerAmount = playerItem and playerItem:getAmount() or 0
+                                            if playerAmount >= cost:getAmount() then
+                                                UpgradeService:upgradeForest(upgradeName)
+                                                task.wait(1) 
+                                            end
+                                        end
+                                    end
+                                end
+                            end)
+                            task.wait(5) 
+                        end
+                    end)
+                end
+            end
+        })
+    end
+    
+    -- Final UI setup calls
+    SaveManager:SetLibrary(Library)
+    InterfaceManager:SetLibrary(Library)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes{}
+    InterfaceManager:SetFolder("FluentScriptHub")
+    SaveManager:SetFolder("FluentScriptHub/specific-game")
+    InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+    SaveManager:BuildConfigSection(Tabs.Settings)
+    Window:SelectTab(1)
+    SaveManager:LoadAutoloadConfig()
+end
+
+task.spawn(function()
+    if not game:IsLoaded() then game.Loaded:Wait() end
+
+    -- Initialize Knit and all necessary game services/controllers first
+    Knit = require(ReplicatedStorage.Packages.Knit)
+    Knit.OnStart():await()
+
+    ClickService = Knit.GetService("ClickService")
+    UpgradeService = Knit.GetService("UpgradeService")
+    
+    DataController = Knit.GetController("DataController")
+    
+    Functions = require(ReplicatedStorage.Shared.Functions)
+    Util = require(ReplicatedStorage.Shared.Util)
+    Values = require(ReplicatedStorage.Shared.Values)   
+
+    -- Now that services are ready, build the UI
+    Window = Library:Window{
+        Title = "RCU - Halloween",
+        SubTitle = "By Duckie",
+        TabWidth = 160,
+        Size =  UDim2.fromOffset(580, 460),
+        Resize = false,
+        Theme = "Darker",
+        MinimizeKey = Enum.KeyCode.LeftShift
+    }
+
+    Tabs = {
+        Halloween = Window:AddTab({ Title = "Halloween Event", Icon = "ghost" }),
+        Settings = Window:AddTab({ Title = "Settings", Icon = "cog" }),
+    }
+
+    -- Finally, call BuildUI to create all the sections
+    BuildUI()
+end)
