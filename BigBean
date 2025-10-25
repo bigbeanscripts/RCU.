@@ -4365,7 +4365,7 @@ task.spawn(function()
     }
 
     Tabs = {
-        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),\
+        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
         Event = Window:AddTab({ Title = "Event", Icon = "ghost" }),
         Main = Window:AddTab({ Title = "Auto Farm", Icon = "crown" }),
         Eggs = Window:AddTab({ Title = "Eggs", Icon = "egg" }),
@@ -4382,4 +4382,3 @@ task.spawn(function()
 
     BuildUI()
 end)
-
