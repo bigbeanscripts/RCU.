@@ -31,15 +31,124 @@ BuildUI = function()
         Description = "Automatically clicks for you - Extremely fast!",
         Default = false,
         Callback = function(Value)
-            _G.AutoClicking = Value
+            AutoClicking = Value
             if Value then
                 task.spawn(function()
-                    while _G.AutoClicking do
+                    while AutoClicking do
                         ClickService.click._re:FireServer()
                         task.wait(0.001)
                     end
                 end)
             end
+        end
+    })
+
+   local HalloweenHatchSection = Tabs.Halloween:AddSection("Auto Hatch (Halloween)")
+
+    -- Get egg names from the Halloween map and add the special boss egg
+    local halloweenEggOptions = {}
+    pcall(function()
+        local eggFolder = Workspace.Game.Maps:FindFirstChild("0Halloween") and Workspace.Game.Maps["0Halloween"]:FindFirstChild("Eggs")
+        if eggFolder then
+            for _, eggModel in ipairs(eggFolder:GetChildren()) do table.insert(halloweenEggOptions, eggModel.Name) end
+        end
+    end)
+    table.insert(halloweenEggOptions, "Halloween (Boss)")
+    
+    local selectedHalloweenEgg = halloweenEggOptions[1] or "Basic"
+
+    -- UI Element 1: Egg Selection Dropdown
+    HalloweenHatchSection:Dropdown("SelectHalloweenEgg", {
+        Title = "Select Egg",
+        Values = halloweenEggOptions,
+        Default = selectedHalloweenEgg,
+        Callback = function(value) selectedHalloweenEgg = value end
+    })
+
+    -- UI Element 2: Hatch Amount Dropdown
+    local halloweenHatchAmounts = {["1x"]=1, ["3x"]=3, ["Max"]=99}
+    local selectedHalloweenAmount = halloweenHatchAmounts["Max"]
+    HalloweenHatchSection:Dropdown("SelectHalloweenHatchAmount", {
+        Title = "Select Hatch Amount",
+        Values = {"1x", "3x", "Max"},
+        Default = "Max",
+        Callback = function(value) selectedHalloweenAmount = halloweenHatchAmounts[value] or 1 end
+    })
+
+    -- UI Element 3: Lucky Eggs Toggle
+    local useHalloweenLuckyEggs = false
+    HalloweenHatchSection:Toggle("UseHalloweenLuckyEggs", {
+        Title = "Use Lucky Eggs",
+        Description = "Does not apply to the 'Halloween (Boss)' egg.",
+        Default = false,
+        Callback = function(enabled) useHalloweenLuckyEggs = enabled end
+    })
+
+    -- Ensure the global hatch delay logic is present
+    if not _G.SmartHatchDelay then
+        _G.SmartHatchDelay = 4.11
+        task.spawn(function()
+            local hatchTimeLabel = LocalPlayer.PlayerGui.MainUI.Menus.SettingsFrame.Main.List.Multipliers.HatchingSpeed.Main.Amount
+            while true do
+                pcall(function()
+                    local numberString = string.match(hatchTimeLabel.Text, "%d+%.?%d*")
+                    if numberString then _G.SmartHatchDelay = (tonumber(numberString) or 4.01) + 0.1 end
+                end)
+                task.wait(5)
+            end
+        end)
+    end
+    
+    -- UI Element 4: Auto Hatch Toggle
+    local autoHalloweenHatchThread = nil
+    HalloweenHatchSection:Toggle("AutoHatchHalloween", {
+        Title = "Auto Hatch Event Eggs",
+        Default = false,
+        Callback = function(enabled)
+            if autoHalloweenHatchThread then task.cancel(autoHalloweenHatchThread); autoHalloweenHatchThread = nil end
+            if enabled then
+                autoHalloweenHatchThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            if selectedHalloweenEgg == "Halloween (Boss)" then
+                                Knit.GetService("EggService").openEgg._re:FireServer("Halloween", selectedHalloweenAmount, {isBossCave = true})
+                            else
+                                local args = {selectedHalloweenEgg, selectedHalloweenAmount}
+                                if useHalloweenLuckyEggs then
+                                    local anyAvailableLuckyId = next((Knit.GetController("EggController"))._luckyEggs or {})
+                                    if anyAvailableLuckyId then table.insert(args, {luckyEggId = anyAvailableLuckyId}) end
+                                end
+                                Knit.GetService("EggService").openEgg._re:FireServer(unpack(args))
+                            end
+                        end)
+                        task.wait(_G.SmartHatchDelay)
+                    end
+                end)
+            end
+        end
+    })
+
+    -- UI Element 5: Hide Animation Toggle
+    HalloweenHatchSection:Toggle("HideHalloweenHatchAnimation", {
+        Title = "Hide Hatch Animation",
+        Default = false,
+        Callback = function(Value)
+            local HatchingController = require(LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("Controllers"):WaitForChild("HatchingController"))
+            local function overrideFunctions(shouldHide)
+                if not HatchingController._originalFunctions and shouldHide then
+                    HatchingController._originalFunctions = {
+                        playEggAnimation = HatchingController.playEggAnimation, playHatchingAnimation = HatchingController.playHatchingAnimation,
+                        animatePetIn = HatchingController.animatePetIn, animatePetOut = HatchingController.animatePetOut,
+                        dropEggs = HatchingController.dropEggs, shakeEggs = HatchingController.shakeEggs,
+                        scaleAndRemoveEggs = HatchingController.scaleAndRemoveEggs, playRevealSounds = HatchingController.playRevealSounds
+                    }
+                end
+                local emptyFunc = function() return nil end
+                for funcName, originalFunc in pairs(HatchingController._originalFunctions or {}) do
+                    HatchingController[funcName] = shouldHide and emptyFunc or originalFunc
+                end
+            end
+            overrideFunctions(Value)
         end
     })
     
@@ -247,10 +356,9 @@ BuildUI = function()
         Default = {}
     })
 
-    -- Corrected syntax and assignment
     AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
-        Title = "Auto Hit",
-        Description = "Attacks selected mobs. If none are found, it will attack the weakest mob available.",
+        Title = "Auto Kill Mobs",
+        Description = "Kill selected mobs. If no selected mobs exist, the script will kill the weakest mobs.",
         Default = false,
         Callback = function(enabled)
             if autoHitThread then
@@ -262,41 +370,74 @@ BuildUI = function()
                 autoHitThread = task.spawn(function()
                     while enabled do
                         pcall(function()
+                            
                             local selectedMobTypes = mobDropdown.Value
                             local playerData = DataController:getData()
                             local activeMobs = playerData and playerData.mobs
-                            if not activeMobs or not next(activeMobs) then return end
                             
-                            local targetableMobs = {}
+                            if not activeMobs or not next(activeMobs) then
+                                return
+                            end
+
+                            local availableTypes = {}
                             for instanceId, mobData in pairs(activeMobs) do
                                 if selectedMobTypes[mobData.mobId] then
-                                    local baseStats = MobsModule[mobData.mobId]
-                                    if baseStats then
-                                        table.insert(targetableMobs, {id = instanceId, name = mobData.mobId, health = baseStats.hp - (mobData.damage or 0)})
+                                    local mobId = mobData.mobId
+                                    availableTypes[mobId] = availableTypes[mobId] or {}
+                                    if MobsModule[mobId] then
+                                        table.insert(availableTypes[mobId], {
+                                            id = instanceId, name = mobId,
+                                            health = MobsModule[mobId].hp - (mobData.damage or 0)
+                                        })
                                     end
                                 end
                             end
 
                             local target
-                            if #targetableMobs == 0 then
+                            
+                            local typeKeys = {}
+                            for typeName, mobList in pairs(availableTypes) do
+                                table.insert(typeKeys, typeName)
+                            end
+
+                            if #typeKeys > 0 then
+
+                                local chosenTypeName = typeKeys[math.random(1, #typeKeys)]
+                                local mobsOfChosenType = availableTypes[chosenTypeName]
+                                
+
+                                local lowestHealth = math.huge
+                                for _, mob in ipairs(mobsOfChosenType) do
+                                    if mob.health < lowestHealth then
+                                        lowestHealth = mob.health
+                                    end
+                                end
+
+                                local weakestTies = {}
+                                for _, mob in ipairs(mobsOfChosenType) do
+                                    if mob.health == lowestHealth then
+                                        table.insert(weakestTies, mob)
+                                    end
+                                end
+                                
+                                if #weakestTies > 0 then
+                                    target = weakestTies[math.random(1, #weakestTies)]
+                                end
+                            else
                                 local lowestHealth = math.huge
                                 for instanceId, mobData in pairs(activeMobs) do
-                                    local baseStats = MobsModule[mobData.mobId]
-                                    if baseStats then
-                                        local currentHealth = baseStats.hp - (mobData.damage or 0)
+                                    if MobsModule[mobData.mobId] then
+                                        local currentHealth = MobsModule[mobData.mobId].hp - (mobData.damage or 0)
                                         if currentHealth < lowestHealth then
-                                            lowestHealth = currentHealth
-                                            target = {id = instanceId, name = mobData.mobId, health = currentHealth}
+                                            lowestHealth, target = currentHealth, {id = instanceId, name = mobData.mobId, health = currentHealth}
                                         end
                                     end
                                 end
-                            else
-                                table.sort(targetableMobs, function(a, b) return a.health < b.health end)
-                                target = targetableMobs[1]
                             end
 
-                            if target then
+                            if target and target.id then
                                 Knit.GetService("HalloweenService").damage._re:FireServer(target.id)
+                            else
                             end
                         end)
                         task.wait(0.25)
@@ -560,6 +701,97 @@ BuildUI = function()
                     HitSpeed:SetValue(originalAutoHitSettings.HitSpeedState)
                     originalAutoHitSettings = nil
                 end
+            end
+        end
+    })
+
+
+    local BossCaveSection = Tabs.Halloween:AddSection("Boss Cave")
+
+    local autoHitCaveThread, originalCaveSettings = nil, nil
+
+    BossCaveSection:Toggle("AutoHitCaveMobs", {
+        Title = "Auto Hit Mobs",
+        Description = "Automatically attacks mobs inside the Boss Cave and enables helper toggles.",
+        Default = false,
+        Callback = function(enabled)
+            if autoHitCaveThread then
+                task.cancel(autoHitCaveThread)
+                autoHitCaveThread = nil
+            end
+
+            if enabled then
+                originalCaveSettings = {
+                    equipBestState = EquipBest.Value,
+                    hitSpeedState = HitSpeed.Value
+                }
+
+                -- 2. Force the helper toggles ON
+                EquipBest:SetValue(true)
+                HitSpeed:SetValue(true)
+
+                -- This variable will keep track of our current target
+                local currentTargetId = nil
+                
+                autoHitCaveThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            local CollectionService = game:GetService("CollectionService")
+                            local isTargetValid = false
+
+                            if currentTargetId then
+                                for _, mob in ipairs(CollectionService:GetTagged("bossCaveMob")) do
+                                    if mob:GetAttribute("mobId") == currentTargetId then
+                                        isTargetValid = true
+                                        break
+                                    end
+                                end
+                            end
+
+                            if not isTargetValid then
+                                currentTargetId = nil
+                                local allMobs = CollectionService:GetTagged("bossCaveMob")
+                                if #allMobs > 0 then
+                                    currentTargetId = allMobs[1]:GetAttribute("mobId")
+                                else
+                                end
+                            end
+
+                            if currentTargetId then
+                                Knit.GetService("BossCaveService").damage._re:FireServer(currentTargetId)
+                            end
+                        end)
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                -- 3. Restore the original settings when the toggle is turned OFF
+                if originalCaveSettings then
+                    EquipBest:SetValue(originalCaveSettings.equipBestState)
+                    HitSpeed:SetValue(originalCaveSettings.hitSpeedState)
+                    originalCaveSettings = nil -- Clear the saved data
+                end
+            end
+        end
+    })
+
+    BossCaveSection:Toggle("ClaimBossChest", {
+        Title = "Claim Boss Chest",
+        Description = "Automatically claims the Boss Chest.",
+        Default = false,
+        Callback = function(enabled)
+            local claimThread
+            if claimThread then task.cancel(claimThread) end
+
+            if enabled then
+                claimThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            Knit.GetService("BossCaveService"):claimBossChest()
+                        end)
+                        task.wait(10)
+                    end
+                end)
             end
         end
     })
