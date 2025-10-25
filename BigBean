@@ -64,6 +64,17 @@ end)
 
 BuildUI = function()
 
+    local EventSection = Tabs.Event:AddSection("Halloween Event")
+
+    EventSection:AddButton({
+        Title = "Load the Halloween Event Script",
+        Description = "Loads my Halloween Event script",
+        Callback = function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/bigbeanscripts/RCU./refs/heads/main/Halloween"))()
+        end
+    })
+
+
     local ClickSection = Tabs.Main:AddSection("Auto Click")
 
     local AutoClick =ClickSection:Toggle("AutoClick", {
@@ -4354,7 +4365,8 @@ task.spawn(function()
     }
 
     Tabs = {
-        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
+        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),\
+        Event = Window:AddTab({ Title = "Event", Icon = "ghost" }),
         Main = Window:AddTab({ Title = "Auto Farm", Icon = "crown" }),
         Eggs = Window:AddTab({ Title = "Eggs", Icon = "egg" }),
         Tree = Window:AddTab({ Title = "Axe/Tree", Icon = "phosphor-tree-evergreen-duotone" }),
