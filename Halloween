@@ -21,8 +21,8 @@ spawn(function()
 end)
 
 BuildUI = function()
-    -- Declare UI elements that need to be shared between sections
-    local mobDropdown, AutoHitToggle
+
+    local mobDropdown, AutoHitToggle, EquipBest, HitSpeed, AutoUpgradeSwordToggle, AutoRebirthToggle
 
     local AutoClickSection = Tabs.Halloween:AddSection("Auto Click")
 
@@ -601,7 +601,7 @@ BuildUI = function()
         end
     end)
 
-SwordUpgradesSection:Toggle("AutoUpgradeSword", {
+    local AutoUpgradeSwordToggle = SwordUpgradesSection:Toggle("AutoUpgradeSword", {
         Title = "Auto Upgrade Sword",
         Description = "Automatically upgrades your sword and farms only the necessary materials.",
         Default = false,
@@ -712,97 +712,7 @@ SwordUpgradesSection:Toggle("AutoUpgradeSword", {
         end
     })
 
-
-    local BossCaveSection = Tabs.Halloween:AddSection("Boss Cave")
-
-    local autoHitCaveThread, originalCaveSettings = nil, nil
-
-    BossCaveSection:Toggle("AutoHitCaveMobs", {
-        Title = "Auto Hit Mobs",
-        Description = "Automatically attacks mobs inside the Boss Cave and enables helper toggles.",
-        Default = false,
-        Callback = function(enabled)
-            if autoHitCaveThread then
-                task.cancel(autoHitCaveThread)
-                autoHitCaveThread = nil
-            end
-
-            if enabled then
-                originalCaveSettings = {
-                    equipBestState = EquipBest.Value,
-                    hitSpeedState = HitSpeed.Value
-                }
-
-                -- 2. Force the helper toggles ON
-                EquipBest:SetValue(true)
-                HitSpeed:SetValue(true)
-
-                -- This variable will keep track of our current target
-                local currentTargetId = nil
-                
-                autoHitCaveThread = task.spawn(function()
-                    while enabled do
-                        pcall(function()
-                            local CollectionService = game:GetService("CollectionService")
-                            local isTargetValid = false
-
-                            if currentTargetId then
-                                for _, mob in ipairs(CollectionService:GetTagged("bossCaveMob")) do
-                                    if mob:GetAttribute("mobId") == currentTargetId then
-                                        isTargetValid = true
-                                        break
-                                    end
-                                end
-                            end
-
-                            if not isTargetValid then
-                                currentTargetId = nil
-                                local allMobs = CollectionService:GetTagged("bossCaveMob")
-                                if #allMobs > 0 then
-                                    currentTargetId = allMobs[1]:GetAttribute("mobId")
-                                else
-                                end
-                            end
-
-                            if currentTargetId then
-                                Knit.GetService("BossCaveService").damage._re:FireServer(currentTargetId)
-                            end
-                        end)
-                        task.wait(0.25)
-                    end
-                end)
-            else
-                -- 3. Restore the original settings when the toggle is turned OFF
-                if originalCaveSettings then
-                    EquipBest:SetValue(originalCaveSettings.equipBestState)
-                    HitSpeed:SetValue(originalCaveSettings.hitSpeedState)
-                    originalCaveSettings = nil -- Clear the saved data
-                end
-            end
-        end
-    })
-
-    BossCaveSection:Toggle("ClaimBossChest", {
-        Title = "Claim Boss Chest",
-        Description = "Automatically claims the Boss Chest.",
-        Default = false,
-        Callback = function(enabled)
-            local claimThread
-            if claimThread then task.cancel(claimThread) end
-
-            if enabled then
-                claimThread = task.spawn(function()
-                    while enabled do
-                        pcall(function()
-                            Knit.GetService("BossCaveService"):claimBossChest()
-                        end)
-                        task.wait(10)
-                    end
-                end)
-            end
-        end
-    })
-
+    
     local HalloweenRebirthSection = Tabs.Halloween:AddSection("Halloween Rebirth")
 
     local autoRebirthThread, originalAutoHitSettings = nil, nil
@@ -822,6 +732,7 @@ SwordUpgradesSection:Toggle("AutoUpgradeSword", {
         end
         return itemSources
     end
+
     local itemSourceMap = generateItemSourceMap()
 
     local function findRawItem(playerData, itemName)
@@ -867,7 +778,7 @@ SwordUpgradesSection:Toggle("AutoUpgradeSword", {
         end
     end)
     
-    HalloweenRebirthSection:Toggle("AutoRebirth", {
+    local AutoRebirthToggle = HalloweenRebirthSection:Toggle("AutoRebirth", {
         Title = "Auto Rebirth",
         Description = "WARNING: Resets Candy Corns. Will auto-farm materials needed for ALL future rebirths that come from mobs. It is reccomended to only use this when you have the best sword.",
         Default = false,
@@ -954,6 +865,131 @@ SwordUpgradesSection:Toggle("AutoUpgradeSword", {
             end
         end
     })
+    
+    local BossCaveSection = Tabs.Halloween:AddSection("Boss Cave")
+
+    local autoCaveThread, originalToggleStates = nil, nil
+    
+    local isEventStartingSoon = false
+    local inCaveTimer = "N/A"
+
+    local caveTimerParagraph = BossCaveSection:Paragraph("CaveTimer", {
+        Title = "Boss Cave Status",
+        Content = "Initializing..."
+    })
+
+    -- Background task to read the in-game timer from the GUI
+    task.spawn(function()
+        local timerLabel = LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("MainUI"):WaitForChild("HUD"):WaitForChild("Bars"):WaitForChild("BossCave"):WaitForChild("Timer")
+        
+        while true do
+            pcall(function()
+                local currentText = timerLabel.Text
+                inCaveTimer = (currentText ~= "" and currentText) or "N/A"
+                
+                local cycle = (Knit.serverTimeNow - 3600) % 10800
+                isEventStartingSoon = cycle <= 300
+                local time = isEventStartingSoon and 300 - cycle or 10800 - cycle
+                local status = isEventStartingSoon and "Starts in: %s" or "Opens in: %s"
+                
+                local statusText = status:format(Functions.formatTime(time)) .. "\nIn-Cave Time: " .. inCaveTimer
+                caveTimerParagraph:SetValue(statusText)
+            end)
+            task.wait(1)
+        end
+    end)
+
+    BossCaveSection:Toggle("AutoJoinAndFight", {
+        Title = "Auto Join + Fight",
+        Description = "Joins the cave and fights the mobs. Temporarily disables other farming mob toggles while in the cave.",
+        Default = false,
+        Callback = function(enabled)
+            if autoCaveThread then task.cancel(autoCaveThread); autoCaveThread = nil end
+
+            if enabled then
+                originalToggleStates = {
+                    autoRebirth = AutoRebirthToggle.Value, autoUpgrade = AutoUpgradeSwordToggle.Value,
+                    autoHitMobs = AutoHitToggle.Value, equipBest = EquipBest.Value, hitSpeed = HitSpeed.Value
+                }
+                
+                autoCaveThread = task.spawn(function()
+                    local hasPausedOtherToggles = false
+                    local currentTargetId = nil
+                    
+                    while enabled do
+                        pcall(function()
+                            local cycle = (Knit.serverTimeNow - 3600) % 10800
+                            
+                            -- CORRECTED LOGIC: Using a single if/elseif/else chain to manage state
+                            
+                            -- State 1: Joining Phase
+                            if isEventStartingSoon and cycle >= 270 and cycle <= 300 then
+                                if not hasPausedOtherToggles then
+                                    hasPausedOtherToggles = true; print("[Boss Cave] Event starting soon! Pausing other farming toggles.")
+                                    task.defer(function() AutoRebirthToggle:SetValue(false); AutoUpgradeSwordToggle:SetValue(false); AutoHitToggle:SetValue(false); EquipBest:SetValue(true); HitSpeed:SetValue(true) end)
+                                end
+                                print("[Boss Cave] Attempting to join..."); Knit.GetService("BossCaveService"):joinBossCave(); task.wait(9);
+                            
+                            -- State 2: Fighting Phase
+                            elseif inCaveTimer ~= "N/A" and inCaveTimer ~= "00:00" then
+                                if not hasPausedOtherToggles then
+                                    hasPausedOtherToggles = true; print("[Boss Cave] Detected inside cave. Pausing other farming toggles.")
+                                    task.defer(function() AutoRebirthToggle:SetValue(false); AutoUpgradeSwordToggle:SetValue(false); AutoHitToggle:SetValue(false); EquipBest:SetValue(true); HitSpeed:SetValue(true) end)
+                                end
+                                
+                                local isTargetValid=false; if currentTargetId then for _,m in ipairs(game:GetService("CollectionService"):GetTagged("bossCaveMob")) do if m:GetAttribute("mobId")==currentTargetId then isTargetValid=true; break end end end
+                                if not isTargetValid then currentTargetId=nil; local all=game:GetService("CollectionService"):GetTagged("bossCaveMob"); if #all>0 then currentTargetId=all[1]:GetAttribute("mobId"); print("[Boss Cave] New target: "..tostring(currentTargetId)) end end
+                                if currentTargetId then Knit.GetService("BossCaveService").damage._re:FireServer(currentTargetId) end
+                            
+                            -- State 3: Restoration Phase (The "else" for the conditions above)
+                            elseif hasPausedOtherToggles then
+                                if inCaveTimer == "00:00" then print("[Boss Cave] In-cave timer is 00:00. Re-enabling toggles (Attempt 1)...") else print("[Boss Cave] Event ended. Re-enabling toggles (Attempt 1)...") end
+                                task.defer(function() AutoRebirthToggle:SetValue(originalToggleStates.autoRebirth); AutoUpgradeSwordToggle:SetValue(originalToggleStates.autoUpgrade); AutoHitToggle:SetValue(originalToggleStates.autoHitMobs); EquipBest:SetValue(originalToggleStates.equipBest); HitSpeed:SetValue(originalToggleStates.hitSpeed) end)
+                                task.wait(1)
+                                print("[Boss Cave] Re-enabling toggles (Attempt 2)...")
+                                task.defer(function() AutoRebirthToggle:SetValue(originalToggleStates.autoRebirth); AutoUpgradeSwordToggle:SetValue(originalToggleStates.autoUpgrade); AutoHitToggle:SetValue(originalToggleStates.autoHitMobs); EquipBest:SetValue(originalToggleStates.equipBest); HitSpeed:SetValue(originalToggleStates.hitSpeed) end)
+                                
+                                hasPausedOtherToggles = false; currentTargetId = nil
+                                print("[Boss Cave] Restoration complete.")
+                            end
+                        end)
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                if originalToggleStates then
+                    print("[Boss Cave] Master toggle disabled. Restoring all original settings.")
+                    task.defer(function()
+                        AutoRebirthToggle:SetValue(originalToggleStates.autoRebirth); AutoUpgradeSwordToggle:SetValue(originalToggleStates.autoUpgrade); AutoHitToggle:SetValue(originalToggleStates.autoHitMobs)
+                        EquipBest:SetValue(originalToggleStates.equipBest); HitSpeed:SetValue(originalToggleStates.hitSpeed); originalToggleStates = nil
+                    end)
+                end
+            end
+        end
+    })
+
+
+    BossCaveSection:Toggle("ClaimBossChest", {
+        Title = "Claim Boss Chest",
+        Description = "Automatically claims the Boss Chest.",
+        Default = false,
+        Callback = function(enabled)
+            local claimThread
+            if claimThread then task.cancel(claimThread) end
+
+            if enabled then
+                claimThread = task.spawn(function()
+                    while enabled do
+                        pcall(function()
+                            Knit.GetService("BossCaveService"):claimBossChest()
+                        end)
+                        task.wait(10)
+                    end
+                end)
+            end
+        end
+    })
+
 
     local ForestUpgradesSection = Tabs.Halloween:AddSection("Forest Upgrades")
 
