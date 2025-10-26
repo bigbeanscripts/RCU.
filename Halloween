@@ -717,32 +717,35 @@ BuildUI = function()
 
     local autoRebirthThread, originalAutoHitSettings = nil, nil
 
-    -- This function dynamically builds a map of ALL sources for each item.
-    local function generateItemSourceMap()
-        local mobs = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
-        local itemSources = {}
-        for mobId, mobData in pairs(mobs) do
-            for _, reward in ipairs(mobData.rewards or {}) do
-                local item = reward.item
-                if item and item.cl == "halloweenEvent" and item.nm then
-                    itemSources[item.nm] = itemSources[item.nm] or {}
-                    table.insert(itemSources[item.nm], mobId)
+    -- NEW: This function dynamically builds a map of items that have ONLY ONE mob source.
+    local function generateUniqueDropMap()
+        local uniqueMap = {}
+        pcall(function()
+            local mobs = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+            local itemSources = {} -- First, find ALL sources for each item
+            for mobId, mobData in pairs(mobs) do
+                for _, reward in ipairs(mobData.rewards or {}) do
+                    if reward.item and reward.item.nm then
+                        itemSources[reward.item.nm] = itemSources[reward.item.nm] or {}
+                        table.insert(itemSources[reward.item.nm], mobId)
+                    end
                 end
             end
-        end
-        return itemSources
+            -- Now, filter for the ones with only one source
+            for itemName, sources in pairs(itemSources) do
+                if #sources == 1 then
+                    uniqueMap[itemName] = sources[1] -- Map item name directly to the single mobId
+                end
+            end
+        end)
+        return uniqueMap
     end
-
-    local itemSourceMap = generateItemSourceMap()
+    local uniqueDropMap = generateUniqueDropMap()
 
     local function findRawItem(playerData, itemName)
         if not playerData or not playerData.inventory then return nil end
-        for category, items in pairs(playerData.inventory) do
-            if type(items) == "table" then
-                for _, data in pairs(items) do
-                    if type(data) == "table" and data.nm == itemName then return data end
-                end
-            end
+        for _, items in pairs(playerData.inventory) do
+            if type(items) == "table" then for _, data in pairs(items) do if type(data) == "table" and data.nm == itemName then return data end end end
         end
         return nil
     end
@@ -753,34 +756,18 @@ BuildUI = function()
         TitleAlignment = "Middle"
     })
 
-    task.spawn(function()
-        while true do
-            pcall(function()
-                local playerData = DataController:getData()
-                if not playerData then return end
-                local HalloweenRebirths = require(ReplicatedStorage.Shared.List.Halloween.HalloweenRebirths)
-                local currentRebirths = playerData.halloweenRebirths or 0
-                local nextRebirthTier = currentRebirths + 1
-                local requirements = HalloweenRebirths[nextRebirthTier]
-                local contentLines = { "Current Rebirths: " .. currentRebirths }
-                if not requirements then
-                    table.insert(contentLines, "\n🎉 MAXIMUM REBIRTH LEVEL!")
-                else
-                    table.insert(contentLines, "Target: Rebirth " .. nextRebirthTier .. "\n")
-                    table.insert(contentLines, string.format("Candy Corns: %s / %s", Functions.suffixes((findRawItem(playerData, "candyCorns") or {am=0}).am), Functions.suffixes(requirements.candyCorns)))
-                    for _, reqItem in ipairs(requirements.required or {}) do
-                        table.insert(contentLines, string.format("%s: %s / %s", reqItem:getName(), Functions.suffixes((findRawItem(playerData, reqItem:getName()) or {am=0}).am), Functions.suffixes(reqItem:getAmount())))
-                    end
-                end
-                rebirthStatusParagraph:SetValue(table.concat(contentLines, "\n"))
-            end)
-            task.wait(3)
-        end
-    end)
+    task.spawn(function() while true do pcall(function()
+        local data=DataController:getData(); if not data then return end; local list=require(ReplicatedStorage.Shared.List.Halloween.HalloweenRebirths)
+        local cur=data.halloweenRebirths or 0; local nxt=cur+1; local reqs=list[nxt]
+        local lines={"Current Rebirths: "..cur}; if not reqs then table.insert(lines,"\n🎉 MAXIMUM REBIRTH LEVEL!") else
+        table.insert(lines,"Target: Rebirth "..nxt.."\n"); table.insert(lines,string.format("Candy Corns: %s / %s",Functions.suffixes((findRawItem(data,"candyCorns")or{am=0}).am),Functions.suffixes(reqs.candyCorns)))
+        for _,rItem in ipairs(reqs.required or {}) do table.insert(lines,string.format("%s: %s / %s",rItem:getName(),Functions.suffixes((findRawItem(data,rItem:getName())or{am=0}).am),Functions.suffixes(rItem:getAmount()))) end
+        end; rebirthStatusParagraph:SetValue(table.concat(lines,"\n"))
+    end); task.wait(3) end end)
     
     local AutoRebirthToggle = HalloweenRebirthSection:Toggle("AutoRebirth", {
         Title = "Auto Rebirth",
-        Description = "WARNING: Resets Candy Corns. Will auto-farm materials needed for ALL future rebirths that come from mobs. It is reccomended to only use this when you have the best sword.",
+        Description = "WARNING: Resets Candy Corns. This will farm mobs for needed materials.",
         Default = false,
         Callback = function(enabled)
             if autoRebirthThread then task.cancel(autoRebirthThread); autoRebirthThread = nil end
@@ -795,57 +782,47 @@ BuildUI = function()
                             local HalloweenRebirths = require(ReplicatedStorage.Shared.List.Halloween.HalloweenRebirths)
                             local currentRebirths = playerData.halloweenRebirths or 0
                             
-                            -- 1. Calculate TOTAL materials needed for ALL future rebirths
-                            local futureRequirements = {}
-                            for i = currentRebirths + 1, #HalloweenRebirths do
-                                for _, reqItem in ipairs(HalloweenRebirths[i].required or {}) do
-                                    local itemName = reqItem:getName()
-                                    futureRequirements[itemName] = (futureRequirements[itemName] or 0) + reqItem:getAmount()
-                                end
-                            end
-
-                            -- 2. Determine which mobs to farm based on deficits (25-hit limit REMOVED)
                             local mobsToFarm = {}
-                            for itemName, totalNeeded in pairs(futureRequirements) do
-                                local playerAmount = (findRawItem(playerData, itemName) or {am=0}).am
-                                if playerAmount < totalNeeded and itemSourceMap[itemName] then
-                                    for _, mobId in ipairs(itemSourceMap[itemName]) do
-                                        mobsToFarm[mobId] = true
-                                    end
-                                end
-                            end
-                            
-                            -- 3. Update the Auto Hit UI based on the mobs we need to farm
-                            local finalTargets = {}
-                            for mobId, _ in pairs(mobsToFarm) do
-                                table.insert(finalTargets, mobId)
-                            end
+                            local foundPriorityTarget = false
 
-                            local newSelection = {}
-                            if #finalTargets > 0 then
-                                for _, mobIdValue in ipairs(mobDropdown.Values) do
-                                    for _, targetId in ipairs(finalTargets) do
-                                        if mobIdValue:lower() == targetId:lower() then
-                                            newSelection[mobIdValue] = true; break
+                            -- Find the EARLIEST future rebirth with missing UNIQUE materials
+                            for tier = currentRebirths + 1, #HalloweenRebirths do
+                                for _, reqItem in ipairs(HalloweenRebirths[tier].required or {}) do
+                                    local itemName = reqItem:getName()
+                                    -- Check if this item has a unique source
+                                    if uniqueDropMap[itemName] then
+                                        local playerAmount = (findRawItem(playerData, itemName) or {am=0}).am
+                                        if playerAmount < reqItem:getAmount() then
+                                            -- We have a deficit for a uniquely dropped item. This is our target.
+                                            mobsToFarm[uniqueDropMap[itemName]] = true
+                                            foundPriorityTarget = true
                                         end
                                     end
                                 end
+                                -- If we found any mobs to farm for this tier, stop looking at later tiers
+                                if foundPriorityTarget then break end
                             end
                             
+                            -- Update the Auto Hit UI based on our findings
+                            local finalTargets = {}; for mobId in pairs(mobsToFarm) do table.insert(finalTargets, mobId) end
+                            local newSelection = {}; if #finalTargets > 0 then
+                                for _, mobIdValue in ipairs(mobDropdown.Values) do
+                                    for _, targetId in ipairs(finalTargets) do
+                                        if mobIdValue:lower() == targetId:lower() then newSelection[mobIdValue] = true; break end
+                                    end
+                                end
+                            end
                             mobDropdown:SetValue(newSelection)
-                            AutoHitToggle:SetValue(#finalTargets > 0) -- Enable if there are targets, disable if not
-                            EquipBest:SetValue(true) -- Equip best sword only if no farming targets
+                            AutoHitToggle:SetValue(#finalTargets > 0)
+                            EquipBest:SetValue(true)
 
-                            -- 4. Check if CURRENT rebirth is affordable and execute
-                            local nextTier = currentRebirths + 1
-                            local currentRequirements = HalloweenRebirths[nextTier]
+                            -- Check if the CURRENT rebirth is affordable and execute
+                            local currentRequirements = HalloweenRebirths[currentRebirths + 1]
                             if currentRequirements then
                                 local canAfford = true
                                 if (findRawItem(playerData, "candyCorns") or {am=0}).am < currentRequirements.candyCorns then canAfford = false end
                                 for _, reqItem in ipairs(currentRequirements.required or {}) do
-                                    if (findRawItem(playerData, reqItem:getName()) or {am=0}).am < reqItem:getAmount() then
-                                        canAfford = false; break
-                                    end
+                                    if (findRawItem(playerData, reqItem:getName()) or {am=0}).am < reqItem:getAmount() then canAfford = false; break end
                                 end
                                 if canAfford then
                                     Knit.GetService("HalloweenService"):halloweenRebirth()
@@ -853,7 +830,7 @@ BuildUI = function()
                                 end
                             end
                         end)
-                        task.wait(3) -- Re-evaluate farming needs and rebirth status every 3 seconds
+                        task.wait(3)
                     end
                 end)
             else
@@ -919,10 +896,7 @@ BuildUI = function()
                     while enabled do
                         pcall(function()
                             local cycle = (Knit.serverTimeNow - 3600) % 10800
-                            
-                            -- CORRECTED LOGIC: Using a single if/elseif/else chain to manage state
-                            
-                            -- State 1: Joining Phase
+
                             if isEventStartingSoon and cycle >= 270 and cycle <= 300 then
                                 if not hasPausedOtherToggles then
                                     hasPausedOtherToggles = true; print("[Boss Cave] Event starting soon! Pausing other farming toggles.")
