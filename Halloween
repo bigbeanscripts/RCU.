@@ -601,10 +601,9 @@ BuildUI = function()
         end
     end)
 
-    -- The Auto Upgrade toggle
-    SwordUpgradesSection:Toggle("AutoUpgradeSword", {
+SwordUpgradesSection:Toggle("AutoUpgradeSword", {
         Title = "Auto Upgrade Sword",
-        Description = "Automatically upgrades your sword and farms missing materials.",
+        Description = "Automatically upgrades your sword and farms only the necessary materials.",
         Default = false,
         Callback = function(enabled)
             if autoUpgradeSwordThread then task.cancel(autoUpgradeSwordThread); autoUpgradeSwordThread = nil end
@@ -630,15 +629,22 @@ BuildUI = function()
                             for name, data in pairs(HalloweenItems) do
                                 if data.index and data.index == currentWeaponIndex + 1 then nextWeaponName = name; break end
                             end
-                            if not nextWeaponName then return end -- Max level
+                            if not nextWeaponName then 
+                                AutoHitToggle:SetValue(false) -- Max weapon, so turn off farming
+                                return 
+                            end
 
-                            -- Check requirements
-                            local canAfford, missingMaterials = true, {}
+                            -- Check requirements and separate missing materials
+                            local canAfford, missingMaterials, isMissingCandy = true, {}, false
                             for _, reqItem in ipairs(WeaponUpgrader[nextWeaponName].required) do
                                 local itemName, needed = reqItem:getName(), reqItem:getAmount()
                                 if (findRawItem(playerData, itemName) or {am=0}).am < needed then
                                     canAfford = false
-                                    table.insert(missingMaterials, itemName)
+                                    if itemName == "candyCorns" then
+                                        isMissingCandy = true
+                                    else
+                                        table.insert(missingMaterials, itemName)
+                                    end
                                 end
                             end
 
@@ -646,10 +652,20 @@ BuildUI = function()
                                 Knit.GetService("HalloweenWeaponService"):upgradeWeapon()
                                 task.wait(2)
                             else
-                                -- Farming logic
+                                -- NEW FARMING LOGIC
                                 local mobsToFarm = {}
-                                if #missingMaterials == 1 and missingMaterials[1] == "candyCorns" then
-                                    -- Special case: Only need candy, so farm the best mob
+                                
+                                -- Priority 1: Farm specific mobs for non-candy materials
+                                if #missingMaterials > 0 then
+                                    for _, material in ipairs(missingMaterials) do
+                                        if itemSourceMap[material] then
+                                            for _, mobId in ipairs(itemSourceMap[material]) do
+                                                mobsToFarm[mobId:lower()] = true
+                                            end
+                                        end
+                                    end
+                                -- Priority 2: If ONLY candy is missing, farm the best mob for it
+                                elseif isMissingCandy then
                                     local bestSwordInfo, bestIndex = nil, -1
                                     for _, itemData in pairs(playerData.inventory.halloweenEvent) do
                                         local itemStats = HalloweenItems[itemData.nm]
@@ -659,20 +675,11 @@ BuildUI = function()
                                         local damageLimit = bestSwordInfo.multiplier * 25
                                         local viableTargets = {}
                                         for mobId, mobData in pairs(MobsModule) do
-                                            if mobData.hp <= damageLimit then table.insert(viableTargets, mobData) end
+                                            if mobData.hp <= damageLimit then table.insert(viableTargets, {id = mobId, data = mobData}) end
                                         end
                                         if #viableTargets > 0 then
-                                            table.sort(viableTargets, function(a,b) return a.hp > b.hp end)
-                                            mobsToFarm[MobsModule[viableTargets[1].name].name:lower()] = true
-                                        end
-                                    end
-                                else
-                                    -- Farm specific mobs for other materials
-                                    for _, material in ipairs(missingMaterials) do
-                                        if itemSourceMap[material] then
-                                            for _, mobName in ipairs(itemSourceMap[material]) do
-                                                mobsToFarm[mobName:lower()] = true
-                                            end
+                                            table.sort(viableTargets, function(a,b) return a.data.hp > b.data.hp end)
+                                            mobsToFarm[viableTargets[1].id:lower()] = true
                                         end
                                     end
                                 end
