@@ -358,7 +358,7 @@ BuildUI = function()
 
 AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
         Title = "Auto Kill Mobs",
-        Description = "Kills selected mobs. If none are spawned, it targets the strongest mob you can kill in 25 hits.",
+        Description = "Kills selected mobs. If none are found, it will fight suitable mobs based on your weapon.",
         Default = false,
         Callback = function(enabled)
             if autoHitThread then task.cancel(autoHitThread); autoHitThread = nil end
@@ -414,7 +414,6 @@ AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
                                 if bestSwordInfo then
                                     local damageLimit = bestSwordInfo.multiplier * 25
                                     
-                                    -- 2. Find all spawned mobs that can be killed within the limit
                                     local viableTargets = {}
                                     for instanceId, mobData in pairs(activeMobs) do
                                         local mobStats = MobsModule[mobData.mobId]
@@ -426,7 +425,6 @@ AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
                                         end
                                     end
 
-                                    -- 3. If any are found, sort by highest health and pick the top one
                                     if #viableTargets > 0 then
                                         table.sort(viableTargets, function(a, b) return a.health > b.health end)
                                         target = viableTargets[1]
