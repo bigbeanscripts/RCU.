@@ -908,7 +908,7 @@ BuildUI = function()
                                 end
                                 
                                 local isTargetValid=false; if currentTargetId then for _,m in ipairs(game:GetService("CollectionService"):GetTagged("bossCaveMob")) do if m:GetAttribute("mobId")==currentTargetId then isTargetValid=true; break end end end
-                                if not isTargetValid then currentTargetId=nil; local all=game:GetService("CollectionService"):GetTagged("bossCaveMob"); if #all>0 then currentTargetId=all[1]:GetAttribute("mobId"); print("[Boss Cave] New target: "..tostring(currentTargetId)) end end
+                                if not isTargetValid then currentTargetId=nil; local all=game:GetService("CollectionService"):GetTagged("bossCaveMob"); if #all>0 then currentTargetId=all[1]:GetAttribute("mobId") end end
                                 if currentTargetId then Knit.GetService("BossCaveService").damage._re:FireServer(currentTargetId) end
                             
                             -- State 3: Restoration Phase (The "else" for the conditions above)
