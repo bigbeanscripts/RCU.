@@ -356,9 +356,9 @@ BuildUI = function()
         Default = {}
     })
 
-AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
+    local AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
         Title = "Auto Kill Mobs",
-        Description = "Kills selected mobs. If none are found, it will fight suitable mobs based on your weapon.",
+        Description = "Kills selected mobs. If none of the selected mbos are available, it will kill mobs based on your weapon damage.",
         Default = false,
         Callback = function(enabled)
             if autoHitThread then task.cancel(autoHitThread); autoHitThread = nil end
@@ -376,35 +376,23 @@ AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
                             local availableTypes = {}
                             for instanceId, mobData in pairs(activeMobs) do
                                 if selectedMobTypes[mobData.mobId] then
-                                    local mobId = mobData.mobId
-                                    availableTypes[mobId] = availableTypes[mobId] or {}
-                                    if MobsModule[mobId] then
-                                        table.insert(availableTypes[mobId], {
-                                            id = instanceId, name = mobId,
-                                            health = MobsModule[mobId].hp - (mobData.damage or 0)
-                                        })
-                                    end
+                                    local mobId = mobData.mobId; availableTypes[mobId] = availableTypes[mobId] or {}
+                                    if MobsModule[mobId] then table.insert(availableTypes[mobId], { id = instanceId, health = MobsModule[mobId].hp - (mobData.damage or 0) }) end
                                 end
                             end
 
                             local target
-                            
                             local typeKeys = {}; for typeName in pairs(availableTypes) do table.insert(typeKeys, typeName) end
 
                             if #typeKeys > 0 then
-                                -- Primary Logic: A selected mob type is available
                                 local chosenTypeName = typeKeys[math.random(1, #typeKeys)]
                                 local mobsOfChosenType = availableTypes[chosenTypeName]
                                 local lowestHealth = math.huge
                                 for _, mob in ipairs(mobsOfChosenType) do if mob.health < lowestHealth then lowestHealth = mob.health end end
-                                local weakestTies = {}
-                                for _, mob in ipairs(mobsOfChosenType) do if mob.health == lowestHealth then table.insert(weakestTies, mob) end end
+                                local weakestTies = {}; for _, mob in ipairs(mobsOfChosenType) do if mob.health == lowestHealth then table.insert(weakestTies, mob) end end
                                 if #weakestTies > 0 then target = weakestTies[math.random(1, #weakestTies)] end
                             else
-                                -- NEW FALLBACK LOGIC: No selected mobs are available
                                 local HalloweenItems = require(ReplicatedStorage.Shared.List.Items.HalloweenEvent)
-                                
-                                -- 1. Get player's best sword and damage
                                 local bestSwordInfo, bestIndex = nil, -1
                                 for _, itemData in pairs(playerData.inventory.halloweenEvent or {}) do
                                     local itemStats = HalloweenItems[itemData.nm]
@@ -413,21 +401,30 @@ AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
                                 
                                 if bestSwordInfo then
                                     local damageLimit = bestSwordInfo.multiplier * 25
-                                    
                                     local viableTargets = {}
                                     for instanceId, mobData in pairs(activeMobs) do
                                         local mobStats = MobsModule[mobData.mobId]
                                         if mobStats and mobStats.hp <= damageLimit then
-                                            table.insert(viableTargets, {
-                                                id = instanceId, name = mobData.mobId,
-                                                health = mobStats.hp - (mobData.damage or 0)
-                                            })
+                                            table.insert(viableTargets, { id = instanceId, name = mobData.mobId, health = mobStats.hp - (mobData.damage or 0) })
                                         end
                                     end
 
                                     if #viableTargets > 0 then
                                         table.sort(viableTargets, function(a, b) return a.health > b.health end)
                                         target = viableTargets[1]
+                                    end
+                                end
+
+                                if not target then
+                                    local lowestHealth = math.huge
+                                    for instanceId, mobData in pairs(activeMobs) do
+                                        local mobStats = MobsModule[mobData.mobId]
+                                        if mobStats then
+                                            local currentHealth = mobStats.hp - (mobData.damage or 0)
+                                            if currentHealth < lowestHealth then
+                                                lowestHealth, target = currentHealth, {id = instanceId, name = mobData.mobId, health = currentHealth}
+                                            end
+                                        end
                                     end
                                 end
                             end
