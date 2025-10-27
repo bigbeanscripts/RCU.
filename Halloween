@@ -356,28 +356,22 @@ BuildUI = function()
         Default = {}
     })
 
-    AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
+AutoHitToggle = HalloweenMobsSection:Toggle("AutoHit", {
         Title = "Auto Kill Mobs",
-        Description = "Kill selected mobs. If no selected mobs exist, the script will kill the weakest mobs.",
+        Description = "Kills selected mobs. If none are spawned, it targets the strongest mob you can kill in 25 hits.",
         Default = false,
         Callback = function(enabled)
-            if autoHitThread then
-                task.cancel(autoHitThread)
-                autoHitThread = nil
-            end
+            if autoHitThread then task.cancel(autoHitThread); autoHitThread = nil end
 
             if enabled then
                 autoHitThread = task.spawn(function()
                     while enabled do
                         pcall(function()
-                            
                             local selectedMobTypes = mobDropdown.Value
                             local playerData = DataController:getData()
                             local activeMobs = playerData and playerData.mobs
                             
-                            if not activeMobs or not next(activeMobs) then
-                                return
-                            end
+                            if not activeMobs or not next(activeMobs) then return end
 
                             local availableTypes = {}
                             for instanceId, mobData in pairs(activeMobs) do
@@ -395,49 +389,53 @@ BuildUI = function()
 
                             local target
                             
-                            local typeKeys = {}
-                            for typeName, mobList in pairs(availableTypes) do
-                                table.insert(typeKeys, typeName)
-                            end
+                            local typeKeys = {}; for typeName in pairs(availableTypes) do table.insert(typeKeys, typeName) end
 
                             if #typeKeys > 0 then
-
+                                -- Primary Logic: A selected mob type is available
                                 local chosenTypeName = typeKeys[math.random(1, #typeKeys)]
                                 local mobsOfChosenType = availableTypes[chosenTypeName]
-                                
-
                                 local lowestHealth = math.huge
-                                for _, mob in ipairs(mobsOfChosenType) do
-                                    if mob.health < lowestHealth then
-                                        lowestHealth = mob.health
-                                    end
-                                end
-
+                                for _, mob in ipairs(mobsOfChosenType) do if mob.health < lowestHealth then lowestHealth = mob.health end end
                                 local weakestTies = {}
-                                for _, mob in ipairs(mobsOfChosenType) do
-                                    if mob.health == lowestHealth then
-                                        table.insert(weakestTies, mob)
-                                    end
+                                for _, mob in ipairs(mobsOfChosenType) do if mob.health == lowestHealth then table.insert(weakestTies, mob) end end
+                                if #weakestTies > 0 then target = weakestTies[math.random(1, #weakestTies)] end
+                            else
+                                -- NEW FALLBACK LOGIC: No selected mobs are available
+                                local HalloweenItems = require(ReplicatedStorage.Shared.List.Items.HalloweenEvent)
+                                
+                                -- 1. Get player's best sword and damage
+                                local bestSwordInfo, bestIndex = nil, -1
+                                for _, itemData in pairs(playerData.inventory.halloweenEvent or {}) do
+                                    local itemStats = HalloweenItems[itemData.nm]
+                                    if itemStats and itemStats.index and itemStats.index > bestIndex then bestIndex, bestSwordInfo = itemStats.index, itemStats end
                                 end
                                 
-                                if #weakestTies > 0 then
-                                    target = weakestTies[math.random(1, #weakestTies)]
-                                end
-                            else
-                                local lowestHealth = math.huge
-                                for instanceId, mobData in pairs(activeMobs) do
-                                    if MobsModule[mobData.mobId] then
-                                        local currentHealth = MobsModule[mobData.mobId].hp - (mobData.damage or 0)
-                                        if currentHealth < lowestHealth then
-                                            lowestHealth, target = currentHealth, {id = instanceId, name = mobData.mobId, health = currentHealth}
+                                if bestSwordInfo then
+                                    local damageLimit = bestSwordInfo.multiplier * 25
+                                    
+                                    -- 2. Find all spawned mobs that can be killed within the limit
+                                    local viableTargets = {}
+                                    for instanceId, mobData in pairs(activeMobs) do
+                                        local mobStats = MobsModule[mobData.mobId]
+                                        if mobStats and mobStats.hp <= damageLimit then
+                                            table.insert(viableTargets, {
+                                                id = instanceId, name = mobData.mobId,
+                                                health = mobStats.hp - (mobData.damage or 0)
+                                            })
                                         end
+                                    end
+
+                                    -- 3. If any are found, sort by highest health and pick the top one
+                                    if #viableTargets > 0 then
+                                        table.sort(viableTargets, function(a, b) return a.health > b.health end)
+                                        target = viableTargets[1]
                                     end
                                 end
                             end
 
                             if target and target.id then
                                 Knit.GetService("HalloweenService").damage._re:FireServer(target.id)
-                            else
                             end
                         end)
                         task.wait(0.25)
@@ -480,7 +478,7 @@ BuildUI = function()
                             local bestInventoryId = nil
                             for inventoryId, itemData in pairs(playerData.inventory.halloweenEvent) do
                                 local itemStats = HalloweenEventItems[itemData.nm]
-                                if itemStats and itemStats.index and itemData.nm:lower():find("sword") then
+                                if itemStats and itemStats.index and (itemData.nm:lower():find("sword") or itemData.nm:lower():find("blade")) then
                                     if itemStats.index > bestSwordIndex then
                                         bestSwordIndex = itemStats.index
                                         bestInventoryId = inventoryId
@@ -495,7 +493,7 @@ BuildUI = function()
                             else
                                 local currentInventoryId = nil
                                 for inventoryId, itemData in pairs(playerData.inventory.halloweenEvent) do
-                                    if itemData.nm and itemData.nm:lower():find("sword") then
+                                    if itemData.nm and (itemData.nm:lower():find("sword") or itemData.nm:lower():find("blade")) then
                                         currentInventoryId = inventoryId
                                         break
                                     end
@@ -773,7 +771,7 @@ BuildUI = function()
             if autoRebirthThread then task.cancel(autoRebirthThread); autoRebirthThread = nil end
 
             if enabled then
-                originalAutoHitSettings = { selectedMobs = mobDropdown.Value, autoHitState = AutoHitToggle.Value }
+                originalAutoHitSettings = { selectedMobs = mobDropdown.Value, autoHitState = AutoHitToggle.Value, EquipBestState = EquipBest.Value, HitSpeedState = HitSpeed.Value }
                 
                 autoRebirthThread = task.spawn(function()
                     while enabled do
@@ -814,7 +812,8 @@ BuildUI = function()
                             end
                             mobDropdown:SetValue(newSelection)
                             AutoHitToggle:SetValue(#finalTargets > 0)
-                            EquipBest:SetValue(true)
+                            EquipBest:SetValue(next(newSelection) ~= nil)
+                            HitSpeed:SetValue(next(newSelection) ~= nil)
 
                             -- Check if the CURRENT rebirth is affordable and execute
                             local currentRequirements = HalloweenRebirths[currentRebirths + 1]
@@ -837,6 +836,8 @@ BuildUI = function()
                 if originalAutoHitSettings then
                     mobDropdown:SetValue(originalAutoHitSettings.selectedMobs)
                     AutoHitToggle:SetValue(originalAutoHitSettings.autoHitState)
+                    EquipBest:SetValue(originalAutoHitSettings.EquipBestState)
+                    HitSpeed:SetValue(originalAutoHitSettings.HitSpeedState)
                     originalAutoHitSettings = nil
                 end
             end
