@@ -705,43 +705,113 @@ BuildUI = function()
         end
     })
 
-    local HalloweenWheelSection = Tabs.Halloween:AddSection("Halloween Wheel")
 
-    local selectedWheelTier = 1
+    local MonstersPotSection = Tabs.Halloween:AddSection("Monsters Pot")
 
-    HalloweenWheelSection:Dropdown("SelectWheelTier", {
-        Title = "Select Tier",
-        Values = {1, 2, 3, 4},
-        Default = selectedWheelTier,
+    local potOptions = {}
+    local potOptionMap = {}
+    local selectedPotOptionIndex = 1 -- Default to the first item (Ghost Soul)
+
+    pcall(function()
+        local MonstersPotList = require(ReplicatedStorage.Shared.List.Halloween.MonstersPot)
+        for i, data in ipairs(MonstersPotList) do
+            if data.required and #data.required > 0 then
+                local reqItem = data.required[1]
+                -- Use .nm and .am to read the recipe requirements directly
+                local displayName = string.format("%s - %dx", reqItem.nm, reqItem.am)
+                table.insert(potOptions, displayName)
+                potOptionMap[displayName] = {
+                    index = i,
+                    reqName = reqItem.nm,
+                    reqAmount = reqItem.am
+                }
+            end
+        end
+    end)
+    
+    MonstersPotSection:Dropdown("SelectPotItems", {
+        Title = "Select Mob Items",
+        Values = potOptions,
+        Default = potOptions[1],
         Callback = function(value)
-            selectedWheelTier = value
+            for i, name in ipairs(potOptions) do
+                if name == value then
+                    selectedPotOptionIndex = i
+                    break
+                end
+            end
         end
     })
 
-    local autoSpinThread = nil
-    HalloweenWheelSection:Toggle("AutoSpinWheel", {
-        Title = "Auto Spin Wheel",
+    local craftAmountInput = MonstersPotSection:Input("CraftAmount", {
+        Title = "Amount",
+        Default = "1",
+        Numeric = true
+    })
+
+    MonstersPotSection:Button({
+        Title = "Exchange Items (Amount)",
+        Description = "Exchanges the selected item for the specified amount.",
+        Callback = function()
+            local amount = tonumber(craftAmountInput.Value) or 1
+            if amount > 0 then
+                print(string.format("[Monsters Pot] Exchanging item index %d, %d times.", selectedPotOptionIndex, amount))
+                Knit.GetService("HalloweenService"):monstersPot(selectedPotOptionIndex, amount)
+            end
+        end
+    })
+    
+    local autoExchangeAllThread = nil
+    MonstersPotSection:Toggle("ExchangeAll", {
+        Title = "Exchange All",
+        Description = "Continuously calculates the max craftable amount for the selected item and exchanges them.",
         Default = false,
         Callback = function(enabled)
-            if autoSpinThread then
-                task.cancel(autoSpinThread)
-                autoSpinThread = nil
+            if autoExchangeAllThread then
+                task.cancel(autoExchangeAllThread)
+                autoExchangeAllThread = nil
             end
 
             if enabled then
-                autoSpinThread = task.spawn(function()
-                    -- Loops while the toggle is enabled
+                autoExchangeAllThread = task.spawn(function()
                     while enabled do
                         pcall(function()
-                            Knit.GetService("HalloweenService"):halloweenWheelSpin(selectedWheelTier)
+                            local currentSelectionName = potOptions[selectedPotOptionIndex]
+                            local selectionData = potOptionMap[currentSelectionName]
+                            
+                            if selectionData then
+                                local playerData = DataController:getData()
+                                
+                                -- UPDATED LOGIC: Manually find the item in inventory using .nm and .am
+                                local playerItemAmount = 0
+                                if playerData.inventory and playerData.inventory.halloweenEvent then
+                                    for _, inventoryItemData in pairs(playerData.inventory.halloweenEvent) do
+                                        if inventoryItemData.nm == selectionData.reqName then
+                                            playerItemAmount = inventoryItemData.am or 0
+                                            break
+                                        end
+                                    end
+                                end
+                                
+                                local maxCraftable = 0
+                                if selectionData.reqAmount > 0 then
+                                    maxCraftable = math.floor(playerItemAmount / selectionData.reqAmount)
+                                end
+                                
+                                if maxCraftable > 0 then
+                                    print(string.format("[Monsters Pot] Have %d %s. Crafting max possible: %d.", playerItemAmount, selectionData.reqName, maxCraftable))
+                                    Knit.GetService("HalloweenService"):monstersPot(selectedPotOptionIndex, maxCraftable)
+                                    task.wait(1) -- Wait after crafting to allow data to update
+                                end
+                            end
                         end)
-                        task.wait(0.5) 
+                        task.wait(3) -- Wait 3 seconds between checks
                     end
                 end)
             end
         end
     })
-    
+
     local HalloweenRebirthSection = Tabs.Halloween:AddSection("Halloween Rebirth")
 
     local autoRebirthThread, originalAutoHitSettings = nil, nil
