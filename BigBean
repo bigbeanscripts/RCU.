@@ -1626,17 +1626,16 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                     while equipBestPetsEnabled do
                         pcall(function()
                             local itemUtils = require(ReplicatedStorage.Shared.Util).itemUtils
-                            local sharedValues = require(ReplicatedStorage.Shared.Values)
                             local data = DataController:getData()
-                            
                             if not data then return end
                             
-                            -- Get max equippable pets
-                            local maxEquippable = sharedValues.dungeonMaxEquip(LocalPlayer, data)
+                            -- Get max equippable pets from label
+                            local label = game:GetService("Players").LocalPlayer.PlayerGui.MainUI.Menus.DungeonJoinFrame.Main.Default.YourTeamLabel
+                            local text = label.Text -- e.g., "Your Team 7/10"
+                            local maxEquippable = tonumber(string.match(text, "%d+/%d+"):match("/(%d+)"))
                             
                             -- Get all dungeon pets and sort by multiplier
                             local dungeonPets = {}
-                            
                             if data.inventory.pet then
                                 for petId, _ in pairs(data.inventory.pet) do
                                     local pet = itemUtils.getItemFromId(data, petId)
@@ -1658,7 +1657,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                             -- Get best pets to equip
                             local bestPetsToEquip = {}
                             local totalPetsToEquip = 0
-                            
                             for _, petData in ipairs(dungeonPets) do
                                 if totalPetsToEquip < maxEquippable then
                                     local petsToEquip = math.min(petData.amount, maxEquippable - totalPetsToEquip)
@@ -1676,7 +1674,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                                     local correctAmount = shouldKeep and bestPetsToEquip[equippedPetId] or 0
                                     
                                     if not shouldKeep or equippedAmount > correctAmount then
-                                        -- Remove excess or unwanted pets
                                         local removeAmount = equippedAmount - correctAmount
                                         for i = 1, removeAmount do
                                             DungeonService:removePetFromTeam(equippedPetId)
@@ -3604,17 +3601,48 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
             end
         end
     end)
-    createClaimToggle("Playtime", "Auto Claim Playtime Rewards", function()
-        local PlaytimeRewards = require(ReplicatedStorage.Shared.List.PlaytimeRewards)
-        DataController:waitForData()
-        local playerData = DataController:getData()
-        for rewardId, rewardData in pairs(PlaytimeRewards) do
-            local adjustedRequired = rewardData.required * (1 - Values.playtimeRewardCooldown(LocalPlayer, playerData))
-            if adjustedRequired - playerData.playtimeRewardTimer <= 0 and not table.find(playerData.claimedPlaytimeRewards, rewardId) then
-                RewardService:claimPlaytimeReward(rewardId); task.wait(1)
+
+    local autoClaimPlaytimeEnabled = false
+    ClaimSection:Toggle("AutoClaimPlaytime", {
+        Title = "Auto Claim Playtime Rewards",
+        Default = false,
+        Callback = function(enabled)
+            autoClaimPlaytimeEnabled = enabled
+
+            if autoClaimPlaytimeThread then
+                task.cancel(autoClaimPlaytimeThread)
+                autoClaimPlaytimeThread = nil
+            end
+
+            if enabled then
+                autoClaimPlaytimeThread = task.spawn(function()
+                    local Holder = LocalPlayer.PlayerGui.MainUI.Menus.RewardsFrame.Main.Displays.Playtime.Holder
+
+                    while autoClaimPlaytimeEnabled do
+                        local success, err = pcall(function()
+                            for _, rewardFrame in ipairs(Holder:GetChildren()) do
+                                if rewardFrame:IsA("Frame") then
+                                    local rewardId = tonumber(rewardFrame.Name)
+                                    local timerLabel = rewardFrame:FindFirstChild("Main", true) and rewardFrame.Main:FindFirstChild("Timer")
+
+                                    if timerLabel and timerLabel.Text == "Claim" then
+                                        RewardService:claimPlaytimeReward(rewardId)
+                                        task.wait(1)
+                                    end
+                                end
+                            end
+                        end)
+
+                        if not success then
+                        end
+
+                        task.wait(10)
+                    end
+                end)
             end
         end
-    end)
+    })
+
     createClaimToggle("Daily", "Auto Claim Daily Reward", function()
         DataController:waitForData()
         local playerData = DataController:getData()
