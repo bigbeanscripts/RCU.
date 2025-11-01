@@ -705,6 +705,42 @@ BuildUI = function()
         end
     })
 
+    local HalloweenWheelSection = Tabs.Halloween:AddSection("Halloween Wheel")
+
+    local selectedWheelTier = 1
+
+    HalloweenWheelSection:Dropdown("SelectWheelTier", {
+        Title = "Select Tier",
+        Values = {1, 2, 3, 4},
+        Default = selectedWheelTier,
+        Callback = function(value)
+            selectedWheelTier = value
+        end
+    })
+
+    local autoSpinThread = nil
+    HalloweenWheelSection:Toggle("AutoSpinWheel", {
+        Title = "Auto Spin Wheel",
+        Default = false,
+        Callback = function(enabled)
+            if autoSpinThread then
+                task.cancel(autoSpinThread)
+                autoSpinThread = nil
+            end
+
+            if enabled then
+                autoSpinThread = task.spawn(function()
+                    -- Loops while the toggle is enabled
+                    while enabled do
+                        pcall(function()
+                            Knit.GetService("HalloweenService"):halloweenWheelSpin(selectedWheelTier)
+                        end)
+                        task.wait(0.5) 
+                    end
+                end)
+            end
+        end
+    })
     
     local HalloweenRebirthSection = Tabs.Halloween:AddSection("Halloween Rebirth")
 
@@ -1075,7 +1111,187 @@ BuildUI = function()
             end
         })
     end
+
+    local PumpkinHunt = Tabs.PumpkinHunt:AddSection("Pumpkin Hunt")
+
+    PumpkinHunt:Button({
+        Title = "Claim All Hints & Some Pumpkins",
+        Description = "Claims most pumpkins instantly. Use the toggles below to get the rest.",
+        Callback = function()
+            task.spawn(function()
+                -- Get necessary services and data
+                local HalloweenService = Knit.GetService("HalloweenService")
+                local CodesService = Knit.GetService("CodesService")
+                local PumpkinHuntData = require(ReplicatedStorage.Shared.List.Halloween.PumpkinHunt)
+                
+
+                -- 1. Claim all hints first
+                for pumpkinId, data in pairs(PumpkinHuntData) do
+                    if data.hints then
+                        for hintId, hintData in pairs(data.hints) do
+                            if hintData.isFindable then
+                                HalloweenService:claimPumpkinHuntHint(pumpkinId, hintId)
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+                
+                -- 2. Redeem codes
+                CodesService:redeem("13")
+                task.wait(0.2)
+                CodesService:redeem("9X7M2KQ5RD")
+                task.wait(0.2)
+                CodesService:redeem("trickortreat")
+                task.wait(0.2)
+
+                -- 3. Claim all findable pumpkins
+                for pumpkinId, data in pairs(PumpkinHuntData) do
+                    if data.isFindable then
+                        HalloweenService:claimPumpkinHuntPumpkin(pumpkinId)
+                        task.wait(0.1)
+                    end
+                end
+            end)
+        end
+    })
+
+    local getHauntedPumpkinThread = nil
+    local originalHauntedPumpkinSettings = nil
     
+    local GetHauntedPumpkinToggle = Tabs.PumpkinHunt:Toggle("GetHauntedPumpkin", {
+        Title = "Get Haunted Pumpkin",
+        Description = "You must have gotten all the hints using the button above. This kills a spiders and pumpkins in a sequence to get the Haunted Pumpkin.",
+        Default = false,
+        Callback = function(enabled)
+            if getHauntedPumpkinThread then task.cancel(getHauntedPumpkinThread); getHauntedPumpkinThread = nil end
+
+            if enabled then
+                local initialPlayerData = DataController:getData()
+                if initialPlayerData and initialPlayerData.pumpkinHuntFound and initialPlayerData.pumpkinHuntFound.hauntedPumpkin then
+                    task.defer(function() GetHauntedPumpkinToggle:SetValue(false) end)
+                    return
+                end
+
+                originalHauntedPumpkinSettings = {
+                    autoHit = AutoHitToggle.Value,
+                    autoBossCave = AutoBossCaveToggle and AutoBossCaveToggle.Value or false,
+                    equipBest = EquipBest.Value,
+                    mobSelection = mobDropdown.Value
+                }
+
+                getHauntedPumpkinThread = task.spawn(function()
+                    local MobsModule = require(ReplicatedStorage.Shared.List.Halloween.Mobs)
+
+                    -- Helper function to lock onto a target and kill it
+                    local function killMobUntilDead(targetId, mobType)
+                        local currentData = DataController:getData()
+                        while currentData and currentData.mobs and currentData.mobs[targetId] do
+                            Knit.GetService("HalloweenService").damage._re:FireServer(targetId)
+                            task.wait(0.3)
+                            currentData = DataController:getData()
+                        end
+                    end
+
+                    while task.wait(3) do
+                        pcall(function()
+                            local playerData = DataController:getData()
+                            
+                            if playerData.pumpkinHuntFound and playerData.pumpkinHuntFound.hauntedPumpkin then
+                                GetHauntedPumpkinToggle:SetValue(false)
+                                return
+                            end
+
+                            local availableSpiders, availablePumpkins, others = {}, {}, {}
+                            for instanceId, mobData in pairs(playerData.mobs or {}) do
+                                local mobStats = MobsModule[mobData.mobId]
+                                if mobStats then
+                                    local currentHealth = mobStats.hp - (mobData.damage or 0)
+                                    local mobInfo = { id = instanceId, health = currentHealth }
+                                    
+                                    if mobData.mobId:lower() == "spider" then table.insert(availableSpiders, mobInfo)
+                                    elseif mobData.mobId:lower() == "pumpkin" then table.insert(availablePumpkins, mobInfo)
+                                    else table.insert(others, mobInfo) end
+                                end
+                            end
+
+                            -- PRIORITY 1: KILL SEQUENCE. Trigger if we have AT LEAST enough mobs.
+                            if #availableSpiders >= 3 and #availablePumpkins >= 2 then
+                                AutoHitToggle:SetValue(false)
+                                if AutoBossCaveToggle then AutoBossCaveToggle:SetValue(false) end
+                                EquipBest:SetValue(true)
+
+                                local killOrder = {"spider", "pumpkin", "spider", "spider", "pumpkin"}
+                                
+                                local spidersToKill = availableSpiders
+                                local pumpkinsToKill = availablePumpkins
+
+                                for i, mobTypeToKill in ipairs(killOrder) do
+                                    local target
+                                    if mobTypeToKill == "spider" then
+                                        target = table.remove(spidersToKill, 1)
+                                    elseif mobTypeToKill == "pumpkin" then
+                                        target = table.remove(pumpkinsToKill, 1)
+                                    end
+
+                                    if target then
+                                        killMobUntilDead(target.id, mobTypeToKill)
+                                    else
+                                        break
+                                    end
+                                end
+                                return
+
+                            elseif #availableSpiders > 3 or #availablePumpkins > 2 then
+                                AutoHitToggle:SetValue(false)
+                                if AutoBossCaveToggle then AutoBossCaveToggle:SetValue(false) end
+                                EquipBest:SetValue(true)
+
+                                if #availableSpiders > 3 then
+                                    table.sort(availableSpiders, function(a, b) return a.health < b.health end)
+                                    killMobUntilDead(availableSpiders[1].id, "Spider") -- Kill only one weakest, then re-evaluate
+                                end
+
+                                if #availablePumpkins > 2 then
+                                    table.sort(availablePumpkins, function(a, b) return a.health < b.health end)
+                                    killMobUntilDead(availablePumpkins[1].id, "Pumpkin") -- Kill only one weakest, then re-evaluate
+                                end
+                                return
+                            else
+                                if AutoBossCaveToggle then AutoBossCaveToggle:SetValue(false) end
+                                EquipBest:SetValue(true)
+                                
+                                local mobsToFarm = {}
+                                for _, mobName in ipairs(mobDropdown.Values) do
+                                    local lowerName = mobName:lower()
+                                    if lowerName ~= "spider" and lowerName ~= "pumpkin" then
+                                        mobsToFarm[mobName] = true
+                                    end
+                                end
+                                
+                                mobDropdown:SetValue(mobsToFarm)
+                                AutoHitToggle:SetValue(true)
+                            end
+                        end)
+                    end
+                end)
+            else
+                if originalHauntedPumpkinSettings then
+                    AutoHitToggle:SetValue(originalHauntedPumpkinSettings.autoHit)
+                    if AutoBossCaveToggle then AutoBossCaveToggle:SetValue(originalHauntedPumpkinSettings.autoBossCave) end
+                    EquipBest:SetValue(originalHauntedPumpkinSettings.equipBest)
+                    mobDropdown:SetValue(originalHauntedPumpkinSettings.mobSelection)
+                    originalHauntedPumpkinSettings = nil
+                end
+            end
+        end
+    })
+
+    Tabs.PumpkinHunt:Paragraph("ZombiePumpkinInfo", {
+        Title = "Zombie Pumpkin",
+        Content = "In order to get this egg, you need to spin the Halloween Wheel (100m one) 5 times, and then craft a few golden monkeys from the Jungle Egg. You need to have the hints unlocked, so use the button above. Sorry I didn't automate this, I'm too lazy 💀"
+    })
+
     -- Final UI setup calls
     SaveManager:SetLibrary(Library)
     InterfaceManager:SetLibrary(Library)
@@ -1118,7 +1334,9 @@ task.spawn(function()
 
     Tabs = {
         Halloween = Window:AddTab({ Title = "Halloween Event", Icon = "ghost" }),
+        PumpkinHunt = Window:AddTab({ Title = "Pumpkin Hunt", Icon = "map" }),
         Settings = Window:AddTab({ Title = "Settings", Icon = "cog" }),
+
     }
 
     -- Finally, call BuildUI to create all the sections
