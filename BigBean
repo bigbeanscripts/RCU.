@@ -1315,7 +1315,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                         
                         local cheapestUpgrade = affordableUpgrades[1]
 
-                        print(string.format("[AutoUpgradeFarms] Buying cheapest upgrade: %s for %d gems", cheapestUpgrade.id, cheapestUpgrade.cost))
                         FarmService:upgrade(cheapestUpgrade.id)
                         task.wait(0.3) 
                     end
@@ -1357,7 +1356,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
             -- Only run if the toggle is on and at least one farm is selected.
             if _G.AutoClaimFarms and next(claimDropdown.Value or {}) then
                 pcall(function()
-                    print("[AutoClaimFarms Debug] Starting brute-force claim cycle...")
                     
                     local Knit = require(game:GetService("ReplicatedStorage").Packages.Knit)
                     local FarmService = Knit.GetService("FarmService")
@@ -1368,14 +1366,11 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                             local farmId = claimFarmIdMap[farmName]
                             
                             if farmId then
-                                print(string.format("  - Firing remote to claim '%s' (ID: %s)", farmName, farmId))
                                 FarmService:claim(farmId)
                                 task.wait(0.2) -- Small wait between each remote fire
                             end
                         end
                     end
-
-                    print("[AutoClaimFarms Debug] Claim cycle finished.")
                 end)
             end
             
