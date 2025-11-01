@@ -2422,7 +2422,10 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
             local newOptions, newBuildingMap = getUnbuiltBuildings()
             autoCraftOptions = newOptions
             autoCraftBuildingMap = newBuildingMap
-            autoCraftDropdown:SetValues(newOptions)
+
+            pcall(function()
+                autoCraftDropdown:SetValues(newOptions)
+            end)
             updateResourceStatus()
             task.wait(5)
         end
@@ -2647,213 +2650,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         end
     end)
 
-    local autoUnlockWallThread = nil
-
-    local function tableLength(t)
-        local count = 0
-        for _ in pairs(t) do count = count + 1 end
-        return count
-    end
-
-    local function handleAutoUnlockWalls(enabled)
-        -- Stop previous loop if toggle changes
-        if autoUnlockWallThread then
-            task.cancel(autoUnlockWallThread)
-            autoUnlockWallThread = nil
-        end
-
-        if enabled then
-            autoUnlockWallThread = task.spawn(function()
-                while _G.MapQuestEnabled do
-                    pcall(function()
-                        local playerData = DataController:getData()
-                        if not playerData then return end
-
-                        local MapsList = require(ReplicatedStorage.Shared.List.Maps)
-                        local HRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if not HRP then return end
-
-                        -- Scan all walls
-                        for _, wall in pairs(workspace:GetDescendants()) do
-                            if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
-                                local mapId = wall:GetAttribute("mapId")
-                                local mapData = MapsList[mapId]
-
-                                -- Only act on solid walls that we haven't unlocked yet and have quests
-                                if wall.CanCollide and mapData and mapData.quests and not table.find(playerData.maps or {}, mapId) then
-                                    local totalQuests = tableLength(mapData.quests)
-                                    local completedQuests = 0
-
-                                    for questId, questInfo in pairs(mapData.quests) do
-                                        if (playerData.mapQuests[questId] or 0) >= questInfo.amount then
-                                            completedQuests = completedQuests + 1
-                                        end
-                                    end
-
-                                    -- If all quests complete, teleport & unlock
-                                    if completedQuests >= totalQuests then
-
-                                        -- Teleport to the wall
-                                        local wallPosition = wall.Position or (wall:IsA("Model") and wall:GetPivot().Position)
-                                        if wallPosition then
-                                            HRP.CFrame = CFrame.new(wallPosition + Vector3.new(0, 5, 0))
-                                            task.wait(0.2)
-                                        end
-                                        break
-                                    end
-                                end
-                            end
-                        end
-                    end)
-                    task.wait(5)
-                end
-            end)
-        end
-    end
-
-    -- Ensure HumanoidRootPart exists
-    local function getHRP()
-        if player.Character then
-            return player.Character:FindFirstChild("HumanoidRootPart")
-        else
-            player.CharacterAdded:Wait()
-            return player.Character:WaitForChild("HumanoidRootPart")
-        end
-    end
-
-    local HRP = getHRP()
-
-    -- Utility
-    local function tableLength(t)
-        local count = 0
-        if t then
-            for _ in pairs(t) do count = count + 1 end
-        end
-        return count
-    end
-
-    -- Check if all quests for a map are completed
-    local function areAllQuestsCompleted(mapData, playerData)
-        if not mapData or not mapData.quests then return false, 0, 0 end
-        local totalQuests = tableLength(mapData.quests)
-        if totalQuests == 0 then return false, 0, 0 end
-
-        local completed = 0
-        for questId, questInfo in pairs(mapData.quests) do
-            local progress = (playerData.mapQuests and playerData.mapQuests[questId]) or 0
-            if progress >= (questInfo.amount or 0) then
-                completed = completed + 1
-            end
-        end
-        return completed >= totalQuests, completed, totalQuests
-    end
-
-    -- Teleport above a wall
-    local function teleportToWall(wall)
-        if not wall or not wall:IsDescendantOf(Workspace) then return end
-        local pos
-        if wall:IsA("BasePart") then
-            pos = wall.Position
-        elseif wall.GetPivot then
-            pos = wall:GetPivot().Position
-        end
-        if pos then
-            local HRP = getHRP()
-            if HRP then
-                HRP.CFrame = CFrame.new(pos + Vector3.new(0,5,0))
-                task.wait(0.15)
-            end
-        end
-    end
-
-    -- Unlock a wall (animation)
-    local function unlockWall(wall, mapId)
-        pcall(function()
-            MapController:hideWall(wall)
-            MapController:unlockAnimation(wall, mapId)
-        end)
-    end
-
-    -- Main sequential unlock function
-    local function scanWallsSequentially()
-        local playerData = DataController:getData()
-        if not playerData then return end
-
-        local MapsList = require(ReplicatedStorage.Shared.List.Maps)
-        local walls = {}
-
-        -- Collect walls with mapId
-        for _, wall in ipairs(Workspace:GetDescendants()) do
-            if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
-                local mapId = tonumber(wall:GetAttribute("mapId"))
-                local mapData = MapsList[mapId]
-                if mapData then
-                    table.insert(walls, {wall = wall, mapId = mapId, mapData = mapData})
-                end
-            end
-        end
-
-        -- Sort by mapId ascending
-        table.sort(walls, function(a,b) return a.mapId < b.mapId end)
-
-        local highestUnlockedMap = 0
-        for _, id in ipairs(playerData.maps or {}) do
-            if id > highestUnlockedMap then
-                highestUnlockedMap = id
-            end
-        end
-
-        for _, entry in ipairs(walls) do
-            local wall = entry.wall
-            local mapId = entry.mapId
-            local mapData = entry.mapData
-
-            -- Skip walls behind the last unlocked map
-            if mapId > highestUnlockedMap + 1 then
-                -- Need to unlock previous first
-                break
-            end
-
-            -- Check quests
-            local completedAll, _, _ = areAllQuestsCompleted(mapData, playerData)
-            if wall.CanCollide and completedAll then
-                print("[MapWall] Teleporting to wall:", wall:GetFullName())
-                teleportToWall(wall)
-                task.wait(0.2)
-                unlockWall(wall, mapId)
-                -- Update highestUnlockedMap to current
-                highestUnlockedMap = mapId
-            end
-        end
-    end
-
-    -- Auto-unlock loop
-    local autoUnlockThread
-    local function handleAutoUnlock(enabled)
-        if autoUnlockThread then
-            task.cancel(autoUnlockThread)
-            autoUnlockThread = nil
-        end
-
-        if enabled then
-            autoUnlockThread = task.spawn(function()
-                while _G.MapQuestEnabled do
-                    pcall(scanWallsSequentially)
-                    task.wait(5)
-                end
-            end)
-        end
-    end
-
-    -- Listen for new walls dynamically
-    Workspace.DescendantAdded:Connect(function(desc)
-        if _G.MapQuestEnabled and desc:FindFirstChild("UnlockGui") and desc:GetAttribute("mapId") then
-            pcall(scanWallsSequentially)
-        end
-    end)
-
-
-
     -- Toggle in GUI
     MapQuestSection:Toggle("AutoCompleteMapQuest", {
         Title = "Auto Complete Map Quest",
@@ -2862,7 +2658,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         Callback = function(enabled)
             task.spawn(function()
                 _G.MapQuestEnabled = enabled
-                handleAutoUnlock(_G.MapQuestEnabled)
                 
                 -- Store original states when enabling
                 local originalStates = {
@@ -2956,29 +2751,53 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                                         local questType = questData.quest
                                         local required = questData.amount
                                         local questName = questData.name
-                                        
+
                                         if questType == "rebirths" then
-                                            
                                             local currentRebirths = playerData.rebirths or 0
                                             local rebirthsNeeded = required - currentRebirths
-                                            local bestOptionDisplay = nil
 
-                                            if rebirthsNeeded > 0 then
+                                            if rebirthsNeeded > 1e98 then -- 1DTG threshold (adjust if needed)
+                                                -- Equip fixed 150B rebirths
                                                 for _, option in ipairs(rebirthOptions) do
-                                                    if option.amount >= rebirthsNeeded then
-                                                        bestOptionDisplay = option.display
-                                                        break 
+                                                    if option.amount == 150e9 then
+                                                        rebirthDropdown:SetValue(option.display)
+                                                        break
                                                     end
                                                 end
-                                            end
 
-                                            if bestOptionDisplay then
-                                                rebirthDropdown:SetValue(bestOptionDisplay)
+                                                AutoRebirth:SetValue(true)
+
+                                                -- Fire the server request every 3 seconds
+                                                task.spawn(function()
+                                                    local Knit = require(game:GetService("ReplicatedStorage").Packages.Knit)
+                                                    local MapService = Knit.GetService("MapService")
+                                                    while _G.MapQuestEnabled and rebirthsNeeded > 1e12 do
+                                                        pcall(function()
+                                                            MapService:purchaseSpaceWorld()
+                                                        end)
+                                                        task.wait(3)
+                                                    end
+                                                end)
+
                                             else
-                                                rebirthDropdown:SetValue("Max Unlocked")
-                                            end
-                                            AutoRebirth:SetValue(true)
-                                        
+                                                -- Normal rebirth handling (existing logic)
+                                                local bestOptionDisplay = nil
+                                                if rebirthsNeeded > 0 then
+                                                    for _, option in ipairs(rebirthOptions) do
+                                                        if option.amount >= rebirthsNeeded then
+                                                            bestOptionDisplay = option.display
+                                                            break
+                                                        end
+                                                    end
+                                                end
+                                                if bestOptionDisplay then
+                                                    rebirthDropdown:SetValue(bestOptionDisplay)
+                                                else
+                                                    rebirthDropdown:SetValue("Max Unlocked")
+                                                end
+                                                AutoRebirth:SetValue(true)
+                                            end 
+
                                         elseif questType == "openEgg" and questName then
                                             local targetEggName = questName
                                             for _, eggOption in ipairs(eggOptions) do
@@ -3103,7 +2922,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                                             AutoClaimFarm:SetValue(true)
                                         
                                         elseif questType == "building" and questName and (questName:lower():find("bridge") or questName:lower():find("wooden")) then
-                                                print("[AutoQuest] Found 'Wooden Bridge' quest. Setting up auto-crafting.")
                                                 
                                                 local bridgeOptionName = "Wooden Bridge"
                                                 local foundOption = false
@@ -3115,12 +2933,9 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                                                 end
 
                                                 if foundOption then
-                                                    print("  - Found 'Wooden Bridge' in dropdown options.")
-                                                    print("    >> ACTION: Selecting 'Wooden Bridge' and enabling Auto Craft.")
                                                     autoCraftDropdown:SetValue({[bridgeOptionName] = true})
                                                     AutoCraftBuildings:SetValue(true)
                                                 else
-                                                    warn("[AutoQuest] Could not find 'Wooden Bridge' in the Auto Craft dropdown list.")
                                                 end
                                                 
                                         elseif questType == "usePotions" then
