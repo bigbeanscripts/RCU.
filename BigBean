@@ -94,30 +94,26 @@ BuildUI = function()
         end
     })
 
-    local RebirthSection = Tabs.Main:AddSection("Rebirths")
+local RebirthSection = Tabs.Main:AddSection("Rebirths")
 
     local selectedRebirthIndex = "Max Unlocked"
-    local rebirthDropdown  -- Keep this declaration
+    local rebirthDropdown
     local rebirthOptions = {}
-    local isMaxUnlockedSelected = false
+    local isMaxUnlockedSelected = true -- Default to true since "Max Unlocked" is the default
     local autoRebirthRunning = false
 
-    getUnlockedRebirthOptions = function()
+    -- This function gets ALL rebirths for the initial dropdown population.
+    local function getAllRebirthOptions()
         local Rebirths = require(ReplicatedStorage.Shared.List.Rebirths)
-        local Upgrades = require(ReplicatedStorage.Shared.List.Upgrades)
-        local data = DataController.data
-        local upgradeLevel = data.upgrades.rebirthButtons or 0
-        local maxValue = Upgrades.rebirthButtons.upgrades[upgradeLevel].value
         local options = {}
         for index, amount in pairs(Rebirths) do
-            if index <= maxValue then
-                table.insert(options, {index = index, amount = amount, display = Functions.suffixes(amount) .. " Rebirths"})
-            end
+            table.insert(options, {index = index, amount = amount, display = Functions.suffixes(amount) .. " Rebirths"})
         end
         table.sort(options, function(a, b) return a.amount < b.amount end)
         return options
     end
 
+    -- This function dynamically finds the best UNLOCKED rebirth you can do right now.
     GetBestRebirthOption = function()
         local Rebirths = require(ReplicatedStorage.Shared.List.Rebirths)
         local Upgrades = require(ReplicatedStorage.Shared.List.Upgrades)
@@ -132,9 +128,10 @@ BuildUI = function()
         return #unlockedOptions > 0 and unlockedOptions[1].id or nil
     end
 
+    -- This function is now only called ONCE.
     updateRebirthDropdown = function()
         pcall(function()
-            local options = getUnlockedRebirthOptions()
+            local options = getAllRebirthOptions() 
             rebirthOptions = options
             local dropdownValues = {"Max Unlocked"}
             for _, option in ipairs(options) do table.insert(dropdownValues, option.display) end
@@ -145,6 +142,7 @@ BuildUI = function()
     performRebirth = function()
         local rebirthIndex
         if isMaxUnlockedSelected then
+            -- This is called repeatedly by the toggle, always getting the latest best option.
             rebirthIndex = GetBestRebirthOption()
         elseif selectedRebirthIndex > 0 and selectedRebirthIndex <= #rebirthOptions then
             rebirthIndex = rebirthOptions[selectedRebirthIndex].index
@@ -156,12 +154,11 @@ BuildUI = function()
         return false
     end
 
-    rebirthDropdown = RebirthSection:Dropdown("RebirthDropdown", {  -- Remove 'local' here since it's already declared above
-        Title = "Select Rebirth Amount", Values = {}, Searchable = true, Default = nil, Multi = false,
+    rebirthDropdown = RebirthSection:Dropdown("RebirthDropdown", {
+        Title = "Select Rebirth Amount", Values = {}, Searchable = true, Default = "Max Unlocked", Multi = false,
         Callback = function(selectedValue)
             if selectedValue == "Max Unlocked" then
                 isMaxUnlockedSelected = true
-                if #rebirthOptions > 0 then selectedRebirthIndex = #rebirthOptions end
             else
                 isMaxUnlockedSelected = false
                 for i, option in ipairs(rebirthOptions) do
@@ -186,16 +183,12 @@ BuildUI = function()
         end
     })
 
+    -- CORRECTED: This task now runs only ONCE to populate the dropdown.
     task.spawn(function()
         DataController:waitForData()
-        task.wait(2)
-        pcall(updateRebirthDropdown)
-        while true do
-            task.wait(5)
-            pcall(updateRebirthDropdown)
-        end
+        task.wait(2) -- Wait for data to be stable before the initial population.
+        pcall(updateRebirthDropdown) -- Call it once and then the task ends.
     end)
-
     local UpgradesSection = Tabs.Main:AddSection("Player Upgrades")
     local ActiveThreads = {}
 
@@ -1234,14 +1227,12 @@ BuildUI = function()
         end
     end)
 
-    local AutoUpgradeFarmSection = Tabs.Farm:AddSection("Auto Upgrade Farms")
+  local AutoUpgradeFarmSection = Tabs.Farm:AddSection("Auto Upgrade Farms")
 
     getAllFarmsWithOptions = function()
         local options, farmMap = {}, {}
         pcall(function()
-            local FarmsList, playerData = require(ReplicatedStorage.Shared.List.Farms), DataController:getData()
-            if not playerData then return end
-
+            local FarmsList = require(ReplicatedStorage.Shared.List.Farms)
             local tempFarms = {}
             for id, info in pairs(FarmsList) do
                 if not id:lower():find("1234") and not info.isNotFarm and info.upgrades then
@@ -1249,14 +1240,10 @@ BuildUI = function()
                     table.insert(tempFarms, { id = id, name = name })
                 end
             end
-
-            -- Always include farmer if upgrades exist
             if FarmsList.farmer and FarmsList.farmer.upgrades then
                 table.insert(tempFarms, { id = "farmer", name = "farmer" })
             end
-
             table.sort(tempFarms, function(a, b) return a.name < b.name end)
-
             for _, data in ipairs(tempFarms) do
                 table.insert(options, data.name)
                 farmMap[data.name] = data.id
@@ -1282,43 +1269,58 @@ BuildUI = function()
         Callback = function(s) _G.AutoUpgradeFarms = s end
     })
 
+    -- NEW: "Buy Burst" loop logic
     task.spawn(function()
-        while task.wait(5) do -- Check affordability every 5 seconds
-            if not (_G.AutoUpgradeFarms and next(upgradeDropdown.Value or {})) then continue end
+        while true do -- This is the main loop with the 5-second wait at the end.
+            if _G.AutoUpgradeFarms and next(upgradeDropdown.Value or {}) then
+                pcall(function()
+                    -- This inner loop is the "buy burst". It will run rapidly until no more upgrades can be afforded.
+                    while true do 
+                        local selected = upgradeDropdown.Value
+                        local FarmsList = require(ReplicatedStorage.Shared.List.Farms)
+                        local playerData = DataController:getData()
+                        if not playerData then break end -- Exit burst if data is lost
 
-            pcall(function()
-                local selected = upgradeDropdown.Value
-                local FarmsList = require(ReplicatedStorage.Shared.List.Farms)
-                local playerData = DataController:getData()
-                if not playerData then return end
+                        local affordableUpgrades = {}
 
-                local upgradesToBuy = {}
+                        -- Step 1: Find ALL currently affordable upgrades
+                        for farmName, isSelected in pairs(selected) do
+                            if isSelected then
+                                local farmId = allFarmIdMap[farmName]
+                                local farmConfig = FarmsList[farmId]
+                                if farmId and farmConfig and farmConfig.upgrades and (playerData.farms and playerData.farms[farmId]) then
+                                    local currentLevel = playerData.farms[farmId].stage or 0
+                                    local nextLevel = currentLevel + 1
+                                    local nextUpgradeInfo = farmConfig.upgrades[nextLevel]
+                                    if nextUpgradeInfo then
+                                        local upgradeCost = nextUpgradeInfo.price or 0
+                                        if (playerData.gems or 0) >= upgradeCost then
+                                            table.insert(affordableUpgrades, {id = farmId, cost = upgradeCost})
+                                        end
+                                    end
+                                end
+                            end
+                        end
 
-                for farmName, isSelected in pairs(selected) do
-                    if not isSelected then continue end
+                        -- Step 2: If there's nothing to buy, exit the burst loop.
+                        if #affordableUpgrades == 0 then
+                            break 
+                        end
 
-                    local farmId = allFarmIdMap[farmName]
-                    local farmConfig = FarmsList[farmId]
-                    if not (farmId and farmConfig and farmConfig.upgrades) then continue end
-                    if not (playerData.farms and playerData.farms[farmId]) then continue end
+                        -- Step 3: Sort to find the CHEAPEST affordable upgrade
+                        table.sort(affordableUpgrades, function(a, b)
+                            return a.cost < b.cost
+                        end)
+                        
+                        local cheapestUpgrade = affordableUpgrades[1]
 
-                    local currentLevel = playerData.farms[farmId].stage or 0
-                    local nextLevel = currentLevel + 1
-                    local nextUpgradeInfo = farmConfig.upgrades[nextLevel]
-                    if not nextUpgradeInfo then continue end
-
-                    local upgradeCost = nextUpgradeInfo.price or 0
-                    if (playerData.gems or 0) >= upgradeCost then
-                        table.insert(upgradesToBuy, farmId)
+                        print(string.format("[AutoUpgradeFarms] Buying cheapest upgrade: %s for %d gems", cheapestUpgrade.id, cheapestUpgrade.cost))
+                        FarmService:upgrade(cheapestUpgrade.id)
+                        task.wait(0.3) 
                     end
-                end
-
-                -- Buy all upgrades we can afford, every 0.25s
-                for _, farmId in ipairs(upgradesToBuy) do
-                    FarmService:upgrade(farmId)
-                    task.wait(0.25)
-                end
-            end)
+                end)
+            end 
+            task.wait(5) 
         end
     end)
 
@@ -1343,55 +1345,41 @@ BuildUI = function()
     local claimFarmOptions, claimFarmIdMap = getAllFarmsForClaim()
 
     local claimDropdown = AutoClaimSection:Dropdown("SelectFarmsToClaim", {Title = "Select Farms to Auto-Claim", Values = claimFarmOptions, Multi = true, Default = {}})
-    local AutoClaimFarm = AutoClaimSection:Toggle("AutoClaimFarms", {Title = "Auto Claim Farms" , Description = "Claim owned farms when they are ready.", Default = false, Callback = function(s) _G.AutoClaimFarms = s end})
+    local AutoClaimFarm = AutoClaimSection:Toggle("AutoClaimFarms", {Title = "Auto Claim Farms" , Description = "Attempts to claim selected farms every 10 seconds.", Default = false, Callback = function(s) _G.AutoClaimFarms = s end})
 
-    isFarmReady = function(farmId)
-        local playerData = DataController:getData()
-        if not playerData or not playerData.farms or not playerData.farms[farmId] then
-            return false
-        end
-        
-        local farmData = playerData.farms[farmId]
-        local lastClaim = farmData.lastClaim or 0
-        local cooldownDuration = Values.farmCooldown(LocalPlayer, playerData, farmId)
-        local timeLeft = lastClaim + cooldownDuration - Knit.serverTimeNow
-        
-        return timeLeft <= 0
-    end
+    -- This function is no longer needed but kept to avoid breaking other references if any.
+    isFarmReady = function() return false end
 
+    -- CORRECTED: The main loop is now properly structured.
     task.spawn(function()
-        while task.wait(2) do
-            if not _G.AutoClaimFarms or not next(claimDropdown.Value or {}) then continue end
-            pcall(function()
-                local playerData = DataController:getData()
-                if not playerData then return end
-                
-                local Knit = require(game:GetService("ReplicatedStorage").Packages.Knit)
-                local FarmService = Knit.GetService("FarmService")
-                
-                for farmName, selected in pairs(claimDropdown.Value) do
-                    if selected then
-                        local farmId = claimFarmIdMap[farmName]
-                        
-                        if farmId then
-                            local isOwned = playerData.farms and playerData.farms[farmId]
-                            if not isOwned then
-                                continue
-                            end
+        while true do
+            -- Only run if the toggle is on and at least one farm is selected.
+            if _G.AutoClaimFarms and next(claimDropdown.Value or {}) then
+                pcall(function()
+                    print("[AutoClaimFarms Debug] Starting brute-force claim cycle...")
+                    
+                    local Knit = require(game:GetService("ReplicatedStorage").Packages.Knit)
+                    local FarmService = Knit.GetService("FarmService")
+                    
+                    -- Loop through every farm the user has selected in the UI.
+                    for farmName, selected in pairs(claimDropdown.Value) do
+                        if selected then
+                            local farmId = claimFarmIdMap[farmName]
                             
-                            if isFarmReady(farmId) then
-                                local result = FarmService:claim(farmId)
-                                
-                                if result == "success" then
-                                else
-                                end
-                                
-                                task.wait(0.5)
+                            if farmId then
+                                print(string.format("  - Firing remote to claim '%s' (ID: %s)", farmName, farmId))
+                                FarmService:claim(farmId)
+                                task.wait(0.2) -- Small wait between each remote fire
                             end
                         end
                     end
-                end
-            end)
+
+                    print("[AutoClaimFarms Debug] Claim cycle finished.")
+                end)
+            end
+            
+            -- FIX: The main 10-second wait is now here, controlling the frequency of the entire cycle.
+            task.wait(10) 
         end
     end)
     
@@ -1592,12 +1580,49 @@ BuildUI = function()
         end
     end)
 
+    local AutoUnlockWalls = false
+
+    -- Function to start/stop auto wall unlocking
+    local function handleAutoUnlockWalls(enabled)
+        AutoUnlockWalls = enabled
+
+        task.spawn(function()
+            while _G.AutoUnlockWalls do
+                local MapController = require(game:GetService("ReplicatedStorage").Packages.Knit).GetController("MapController")
+                local DataController = require(game:GetService("ReplicatedStorage").Packages.Knit).GetController("DataController")
+                local playerData = DataController:getData()
+                if playerData then
+                    for _, wall in pairs(workspace:GetDescendants()) do
+                        if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
+                            local mapId = wall:GetAttribute("mapId")
+                            local mapData = require(game:GetService("ReplicatedStorage").Shared.List.Maps)[mapId]
+                            if mapData and mapData.quests then
+                                local completed = 0
+                                for questId, questInfo in pairs(mapData.quests) do
+                                    local progress = playerData.mapQuests[questId] or 0
+                                    if progress >= questInfo.amount then
+                                        completed = completed + 1
+                                    end
+                                end
+                                if completed >= #mapData.quests then
+                                    MapController:unlockAnimation(wall, mapId)
+                                    MapController:hideWall(wall)
+                                end
+                            end
+                        end
+                    end
+                end
+                task.wait(5) -- check every 5 seconds
+            end
+        end)
+    end
+
     MapQuestSection:Toggle("AutoCompleteMapQuest", {
         Title = "Auto Complete Map Quest",
         Description = "Automatically completes map quests by setting up the appropriate automation",
         Default = false,
         Callback = function(enabled)
-            -- Create a shared state variable that gets updated
+            handleAutoUnlockWalls(enabled)
             _G.MapQuestEnabled = enabled
             
             -- Store original states when enabling
