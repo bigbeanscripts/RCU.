@@ -34,7 +34,8 @@ local Functions, Util, Values, seasonVariables, seasonUtils, seasonTiersList
 
 local Window, Tabs, EggDropdown, HatchAmount, LuckyEgg, AutoHatch, HideAnimationToggle,
       SelectTreesDropdown, AutoCutTreesToggle, lowercooldown, BypassStrength, AutoEquip, UpgradeAxe,
-      explorerroom, ActivateLeversSection, ClaimSection, AncientWheel, ClanWheel, AncientMerchantSection, PassSection, Aura, EventSection
+      explorerroom, ActivateLeversSection, ClaimSection, AncientWheel, ClanWheel, AncientMerchantSection, PassSection,
+      Aura, EventSection, AutoCraftBuildings, autoCraftDropdown
 
 local selectedEgg, selectedAmount, useLuckyEggs, selectedTrees, autoBreakRunning, isAutoEquipAxeEnabled,
       isAutoUpgradeEnabled, originalSelectedObjects, originalAutoCutState, treeToggleThread, petDisplayToId,
@@ -1489,969 +1490,6 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
 
     task.spawn(function() while task.wait(3) do if PetDropdown and PetDropdown.Value and next(PetDropdown.Value) then pcall(updatePetStatusParagraph, PetDropdown.Value) end end end)
 
-        
-    local MapQuestSection = Tabs.Quest:AddSection("Map Quests")
-
-    local MapQuestStatusParagraph = MapQuestSection:Paragraph("MapQuestStatus", {
-        Title = "Map Quest Progress",
-        Content = "Loading map quest status...",
-        TitleAlignment = "Middle",
-        ContentAlignment = Enum.TextXAlignment.Left
-    })
-
-    local updateMapQuestStatus = function()
-        pcall(function()
-            local Maps = require(ReplicatedStorage.Shared.List.Maps)
-            DataController:waitForData()
-            local playerData = DataController:getData()
-            
-            if not playerData then
-                MapQuestStatusParagraph:SetValue("❌ Could not get player data")
-                return
-            end
-            
-            -- Find highest map number
-            local highestMap = 0
-            if playerData.maps then
-                for mapNumber, _ in pairs(playerData.maps) do
-                    if tonumber(mapNumber) and tonumber(mapNumber) > highestMap then
-                        highestMap = tonumber(mapNumber)
-                    end
-                end
-            end
-            
-            -- Next map to unlock
-            local nextMapNumber = highestMap + 1
-            local nextMap = Maps[nextMapNumber]
-            
-            local statusLines = {}
-            table.insert(statusLines, string.format("🏆 Best Map Owned: %d", highestMap))
-            
-            if nextMap then
-                table.insert(statusLines, string.format("🎯 Next Map: Map %d - %s", nextMapNumber, nextMap.name))
-                table.insert(statusLines, "")
-                
-                if nextMap.quests then
-                    table.insert(statusLines, "📋 Quest Progress:")
-                    
-                    for questIndex, questData in pairs(nextMap.quests) do
-                        local questType = questData.quest
-                        local required = questData.amount
-                        local questName = questData.name
-                        
-                        -- Get progress from mapQuests
-                        local currentProgress = playerData.mapQuests[questIndex] or 0
-                        
-                        -- Cap progress at required amount for display
-                        local displayProgress = math.min(currentProgress, required)
-                        
-                        local isCompleted = currentProgress >= required
-                        local status = isCompleted and "✅" or "❌"
-                        local percentage = math.floor((displayProgress / required) * 100)
-                        
-                        -- Show quest info
-                        local displayText = questType
-                        if questName then
-                            displayText = questType .. " (" .. questName .. ")"
-                        end
-                        
-                        table.insert(statusLines, string.format("%s %s", status, displayText))
-                        table.insert(statusLines, string.format("   %s/%s (%d%%)", 
-                            Functions.suffixes(displayProgress),
-                            Functions.suffixes(required),
-                            percentage
-                        ))
-                    end
-                end
-            else
-                table.insert(statusLines, "🎉 ALL MAPS UNLOCKED!")
-            end
-            
-            MapQuestStatusParagraph:SetValue(table.concat(statusLines, "\n"))
-        end)
-    end
-
- 
-    -- Update map quest status every 5 seconds
-    task.spawn(function()
-        while true do
-            updateMapQuestStatus()
-            task.wait(5)
-        end
-    end)
-
-    local AutoUnlockWalls = false
-
-    -- Function to start/stop auto wall unlocking
-    local function handleAutoUnlockWalls(enabled)
-        AutoUnlockWalls = enabled
-
-        task.spawn(function()
-            while _G.AutoUnlockWalls do
-                local MapController = require(game:GetService("ReplicatedStorage").Packages.Knit).GetController("MapController")
-                local DataController = require(game:GetService("ReplicatedStorage").Packages.Knit).GetController("DataController")
-                local playerData = DataController:getData()
-                if playerData then
-                    for _, wall in pairs(workspace:GetDescendants()) do
-                        if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
-                            local mapId = wall:GetAttribute("mapId")
-                            local mapData = require(game:GetService("ReplicatedStorage").Shared.List.Maps)[mapId]
-                            if mapData and mapData.quests then
-                                local completed = 0
-                                for questId, questInfo in pairs(mapData.quests) do
-                                    local progress = playerData.mapQuests[questId] or 0
-                                    if progress >= questInfo.amount then
-                                        completed = completed + 1
-                                    end
-                                end
-                                if completed >= #mapData.quests then
-                                    MapController:unlockAnimation(wall, mapId)
-                                    MapController:hideWall(wall)
-                                end
-                            end
-                        end
-                    end
-                end
-                task.wait(5) -- check every 5 seconds
-            end
-        end)
-    end
-
-    MapQuestSection:Toggle("AutoCompleteMapQuest", {
-        Title = "Auto Complete Map Quest",
-        Description = "Automatically completes map quests by setting up the appropriate automation",
-        Default = false,
-        Callback = function(enabled)
-            handleAutoUnlockWalls(enabled)
-            _G.MapQuestEnabled = enabled
-            
-            -- Store original states when enabling
-            local originalStates = {
-                autoClickEnabled = AutoClick.Value,
-                autoRebirthEnabled = AutoRebirth.Value,
-                selectedRebirthValue = rebirthDropdown.Value,
-                selectedEggValue = EggDropdown.Value,
-                selectedAmountValue = HatchAmount.Value,
-                autoHatchEnabled = AutoHatch.Value,
-                craftAllToggleState = CraftAllToggle.Value,
-                selectedFarmsForClaim = claimDropdown.Value or {},
-                autoClaimFarmsEnabled = AutoClaimFarm.Value,
-                selectedTreesValue = SelectTreesDropdown.Value,
-                autoCutTreesEnabled = AutoCutTreesToggle.Value,
-                selectedPetsValue = PetDropdown.Value,
-                autoBuyFarmsEnabled = BuyFarm.Value,
-                selectedFarmsToBuy = farmDropdown.Value or {}
-            }
-            
-            local function restoreOriginalStates()
-                -- Restore all original settings immediately
-                pcall(function()
-                    if AutoClick then 
-                        AutoClick:SetValue(originalStates.autoClickEnabled)
-                    end
-                    
-                    if AutoRebirth then
-                        AutoRebirth:SetValue(originalStates.autoRebirthEnabled)
-                    end
-                    
-                    if rebirthDropdown then
-                        rebirthDropdown:SetValue(originalStates.selectedRebirthValue)
-                    end
-                    
-                    if EggDropdown then
-                        EggDropdown:SetValue(originalStates.selectedEggValue)
-                    end
-
-                    if farmDropdown then
-                        farmDropdown:SetValue(originalStates.selectedFarmsToBuy)
-                    end
-                    
-                    if HatchAmount then
-                        HatchAmount:SetValue(originalStates.selectedAmountValue)
-                    end
-                    
-                    if AutoHatch then
-                        AutoHatch:SetValue(originalStates.autoHatchEnabled)
-                    end
-                    
-                    if CraftAllToggle then
-                        CraftAllToggle:SetValue(originalStates.craftAllToggleState)
-                    end
-                    
-                    if claimDropdown then
-                        claimDropdown:SetValue(originalStates.selectedFarmsForClaim)
-                    end
-                    
-                    if AutoClaimFarm then
-                        AutoClaimFarm:SetValue(originalStates.autoClaimFarmsEnabled)
-                    end
-                    
-                    if SelectTreesDropdown then
-                        SelectTreesDropdown:SetValue(originalStates.selectedTreesValue)
-                    end
-                    
-                    if AutoCutTreesToggle then
-                        AutoCutTreesToggle:SetValue(originalStates.autoCutTreesEnabled)
-                    end
-
-                    if BuyFarm then
-                        BuyFarm:SetValue(originalStates.autoBuyFarmsEnabled)
-                    end
-                    
-                    if PetDropdown then
-                        PetDropdown:SetValue(originalStates.selectedPetsValue)
-                    end
-                end)
-            end
-            
-            if enabled then
-                if AutoClick and not AutoClick.Value then
-                    AutoClick:SetValue(true)
-                end
-
-                task.spawn(function()
-                    while _G.MapQuestEnabled do -- Use global variable instead
-                        local success = pcall(function()
-                            -- Exit immediately if disabled
-                            if not _G.MapQuestEnabled then
-                                return
-                            end
-                            
-                            local Maps = require(ReplicatedStorage.Shared.List.Maps)
-                            local playerData = DataController:getData()
-                            
-                            if not playerData then return end
-                            
-                            -- Find highest map number
-                            local highestMap = 0
-                            if playerData.maps then
-                                for mapNumber, _ in pairs(playerData.maps) do
-                                    if tonumber(mapNumber) and tonumber(mapNumber) > highestMap then
-                                        highestMap = tonumber(mapNumber)
-                                    end
-                                end
-                            end
-                            
-                            -- Next map to unlock
-                            local nextMapNumber = highestMap + 1
-                            local nextMap = Maps[nextMapNumber]
-                            
-                            local allQuestsCompleted = true
-                            
-                            if nextMap and nextMap.quests then
-                                for questIndex, questData in pairs(nextMap.quests) do
-                                    -- Check if toggle was turned off at the start of each quest
-                                    if not _G.MapQuestEnabled then
-                                        return
-                                    end
-                                    
-                                    local questType = questData.quest
-                                    local required = questData.amount
-                                    local questName = questData.name
-                                    local currentProgress = playerData.mapQuests[questIndex] or 0
-                                    
-                                    -- Check if quest is completed
-                                    if currentProgress >= required then
-                                        continue -- Skip completed quests
-                                    else
-                                        allQuestsCompleted = false
-                                    end
-                                    
-                                    -- Exit if disabled before processing quest
-                                    if not _G.MapQuestEnabled then
-                                        return
-                                    end
-                                    
-                                    -- Handle different quest types
-                                    if questType == "rebirths" then
-                                        if rebirthDropdown then
-                                            rebirthDropdown:SetValue("Max Unlocked")
-                                        end
-                                        
-                                        if AutoRebirth and not AutoRebirth.Value then
-                                            AutoRebirth:SetValue(true)
-                                        end
-                                        
-                                        
-                                    elseif questType == "openEgg" and questName then
-                                        -- Use the exact egg name from questName
-                                        local targetEggName = questName
-                                        for _, eggOption in ipairs(eggOptions) do
-                                            if eggOption:lower():find(targetEggName:lower()) then
-                                                if EggDropdown then
-                                                    EggDropdown:SetValue(eggOption)
-                                                end
-                                                break
-                                            end
-                                        end
-                                        
-                                        -- Set hatch amount to Max
-                                        if HatchAmount then
-                                            HatchAmount:SetValue("Max")
-                                        end
-                                        
-                                        -- Enable auto hatch
-                                        if AutoHatch and not AutoHatch.Value then
-                                            AutoHatch:SetValue(true)
-                                        end
-
-
-                                    elseif questType == "craftAnyGalaxyPets" then
-                                        -- Use the egg from the zone BEFORE the current target zone
-                                        local previousMapNumber = nextMapNumber - 1
-                                        local previousMap = Maps[previousMapNumber]
-                                        local previousWorldEggName = nil
-                                        
-                                        if previousMap and previousMap.name then
-                                            previousWorldEggName = previousMap.name
-                                        else
-                                            -- Fallback to current world if no previous map
-                                            previousWorldEggName = nextMap.name
-                                        end
-                                        
-                                        -- Select the appropriate egg for the previous world
-                                        for _, eggOption in ipairs(eggOptions) do
-                                            if eggOption:lower():find(previousWorldEggName:lower()) then
-                                                if EggDropdown then
-                                                    EggDropdown:SetValue(eggOption)
-                                                end
-                                                break
-                                            end
-                                        end
-                                        
-                                        -- Enable auto hatch to get pets for crafting
-                                        if AutoHatch and not AutoHatch.Value then
-                                            if HatchAmount then
-                                                HatchAmount:SetValue("Max")
-                                            end
-                                            AutoHatch:SetValue(true)
-                                        end
-                                        
-                                        -- Find pets from the previous world egg for crafting
-                                        task.wait(2) -- Wait for pets to be hatched
-                                        PetDropdown:SetValues(getPlayerPetOptions())
-                                        local playerPetOptions = getPlayerPetOptions()
-                                        local galaxyCraftablePets = {}
-                                        
-                                        -- Get pets specifically from the previous world egg
-                                        local Eggs = require(ReplicatedStorage.Shared.List.Pets.Eggs)
-                                        local previousEggData = Eggs[previousWorldEggName]
-                                        local previousWorldPetNames = {}
-                                        
-                                        if previousEggData and previousEggData.pets then
-                                            for petName, _ in pairs(previousEggData.pets) do
-                                                table.insert(previousWorldPetNames, petName)
-                                            end
-                                        end
-                                        
-                                        -- Find player pets that match previous world pets
-                                        for _, displayName in ipairs(playerPetOptions) do
-                                            for _, worldPetName in ipairs(previousWorldPetNames) do
-                                                if displayName:find(worldPetName) then
-                                                    galaxyCraftablePets[displayName] = true
-                                                    break
-                                                end
-                                            end
-                                        end
-
-                                        -- Also select toxic pets from Comet+ worlds with >0.01% chance
-                                        local toxicPetNames = {}
-                                        if playerData.maps then
-                                            for mapNumber, _ in pairs(playerData.maps) do
-                                                local mapNum = tonumber(mapNumber)
-                                                if mapNum and mapNum >= 17 then -- Moon is 17
-                                                    local mapData = Maps[mapNum]
-                                                    if mapData and mapData.name then
-                                                        local worldEggData = Eggs[mapData.name]
-                                                        if worldEggData and worldEggData.pets then
-                                                            for petName, chance in pairs(worldEggData.pets) do
-                                                                if chance > 0.01 then -- Only pets with >0.01% chance
-                                                                    table.insert(toxicPetNames, petName)
-                                                                end
-                                                            end
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-
-                                        -- Find player pets that match toxic pet names
-                                        for _, displayName in ipairs(playerPetOptions) do
-                                            for _, toxicPetName in ipairs(toxicPetNames) do
-                                                if displayName:find("Toxic") and displayName:find(toxicPetName) then
-                                                    galaxyCraftablePets[displayName] = true
-                                                    break
-                                                end
-                                            end
-                                        end
-                                        
-                                        if next(galaxyCraftablePets) and PetDropdown then
-                                            PetDropdown:SetValue(galaxyCraftablePets)
-                                            
-                                            -- Enable craft all toggle
-                                            if CraftAllToggle and not CraftAllToggle.Value then
-                                                CraftAllToggle:SetValue(true)
-                                            end
-                                        end
-                                        
-                                    elseif questType == "hatchPet" and questName then
-                                        -- For hatchPet quests, use the world name from the PREVIOUS map
-                                        local previousMapNumber = nextMapNumber - 1
-                                        local previousMap = Maps[previousMapNumber]
-                                        local worldName = previousMap and previousMap.name or "Spawn"
-                                        
-                                        -- Find the egg for the previous world
-                                        for _, eggOption in ipairs(eggOptions) do
-                                            if eggOption:lower():find(worldName:lower()) then
-                                                if EggDropdown then
-                                                    EggDropdown:SetValue(eggOption)
-                                                end
-                                                break
-                                            end
-                                        end
-                                        
-                                        -- Set hatch amount to Max and enable auto hatch
-                                        if HatchAmount then
-                                            HatchAmount:SetValue("Max")
-                                        end
-                                        
-                                        if AutoHatch and not AutoHatch.Value then
-                                            AutoHatch:SetValue(true)
-                                        end
-             
-                                    elseif questType == "useAuraDice" then
-                                        -- Find the aura dice the player has the most of
-                                        local bestDiceId = nil
-                                        local maxAmount = 0
-                                        
-                                        if playerData.inventory and playerData.inventory.auraDice then
-                                            for itemId, itemData in pairs(playerData.inventory.auraDice) do
-                                                local amount = itemData.am or 0
-                                                if amount > maxAmount then
-                                                    maxAmount = amount
-                                                    bestDiceId = itemData.nm or itemId
-                                                end
-                                            end
-                                        end
-                                        
-                                        if bestDiceId and maxAmount > 0 then
-                                            -- Use the dice
-                                            pcall(function()
-                                                AuraService:roll(bestDiceId)
-                                            end)
-                                            task.wait(2) -- Wait between rolls
-                                        end
-                                        
-                                    elseif questType == "collectFruits" then
-                                        -- Set rebirth to Max Unlocked and enable auto rebirth
-                                        if rebirthDropdown then
-                                            rebirthDropdown:SetValue("Max Unlocked")
-                                        end
-                                        
-                                        if AutoRebirth and not AutoRebirth.Value then
-                                            AutoRebirth:SetValue(true)
-                                        end
-                                        
-                                        -- Select all farms for buying and enable auto buy
-                                        if farmDropdown then
-                                            local allFarms = {}
-                                            for _, farmName in ipairs(farmOptions) do
-                                                allFarms[farmName] = true
-                                            end
-                                            farmDropdown:SetValue(allFarms)
-
-                                            if BuyFarm and not BuyFarm.Value then
-                                                BuyFarm:SetValue(true)
-                                            end
-                                        end
-                                        
-                                        -- Select all farms in auto claim section and enable toggle
-                                        if claimDropdown then
-                                            local allClaimFarms = {}
-                                            for _, farmName in ipairs(claimFarmOptions) do
-                                                allClaimFarms[farmName] = true
-                                            end
-                                            claimDropdown:SetValue(allClaimFarms)
-                                            
-                                            -- Enable auto claim farms
-                                            if AutoClaimFarm and not AutoClaimFarm.Value then
-                                                AutoClaimFarm:SetValue(true)
-                                            end
-                                        end
-                                    
-                                    elseif questType == "building" and questName then
-                                        -- Build Wooden Bridge for building quests
-                                        if questName:lower():find("bridge") or questName:lower():find("wooden") then
-                                            local Knit = require(game:GetService("ReplicatedStorage").Packages.Knit)
-                                            Knit.GetService("BuildingService"):build("woodenBridge")
-                                        end
-
-                                    elseif questType == "usePotions" then
-                                        -- Find potion with highest amount (non-mega)
-                                        local bestPotionId = nil
-                                        local maxAmount = 0
-                                        
-                                        if playerData.inventory and playerData.inventory.potion then
-                                            for itemId, itemData in pairs(playerData.inventory.potion) do
-                                                local amount = itemData.am or 0
-                                                local name = itemData.nm or ""
-                                                -- Exclude mega potions
-                                                if amount > maxAmount and not name:lower():find("mega") then
-                                                    maxAmount = amount
-                                                    bestPotionId = itemId
-                                                end
-                                            end
-                                        end
-                                        
-                                        if bestPotionId and maxAmount > 0 then
-                                            -- Calculate how many potions needed to complete quest
-                                            local potionsNeeded = required - currentProgress
-                                            potionsNeeded = math.min(potionsNeeded, maxAmount) -- Don't use more than available
-                                            
-                                            if potionsNeeded > 0 then
-                                                pcall(function()
-                                                    local Knit = require(ReplicatedStorage.Packages.Knit)
-                                                    Knit.GetService("InventoryService"):useItem(bestPotionId, {use = potionsNeeded})
-                                                end)
-                                                task.wait(2)
-                                            end
-                                        end
-                                        
-                                    elseif questType == "useMegaPotions" then
-                                        -- Find mega potion with highest amount
-                                        local bestMegaPotionId = nil
-                                        local maxAmount = 0
-                                        
-                                        if playerData.inventory and playerData.inventory.potion then
-                                            for itemId, itemData in pairs(playerData.inventory.potion) do
-                                                local amount = itemData.am or 0
-                                                local name = itemData.nm or ""
-                                                -- Only mega potions
-                                                if amount > maxAmount and name:lower():find("mega") then
-                                                    maxAmount = amount
-                                                    bestMegaPotionId = itemId
-                                                end
-                                            end
-                                        end
-                                        
-                                        if bestMegaPotionId and maxAmount > 0 then
-                                            -- Calculate how many mega potions needed to complete quest
-                                            local megaPotionsNeeded = required - currentProgress
-                                            megaPotionsNeeded = math.min(megaPotionsNeeded, maxAmount) -- Don't use more than available
-                                            
-                                            if megaPotionsNeeded > 0 then
-                                                pcall(function()
-                                                    local Knit = require(ReplicatedStorage.Packages.Knit)
-                                                    Knit.GetService("InventoryService"):useItem(bestMegaPotionId, {use = megaPotionsNeeded})
-                                                end)
-                                                task.wait(2)
-                                            end
-                                        end
-                                    end
-                                    
-                                    -- Check again after each quest processing
-                                    if not _G.MapQuestEnabled then
-                                        return
-                                    end
-                                end
-                            else
-                                allQuestsCompleted = true
-                            end
-                            
-                            -- If all quests are completed, restore original states
-                            if allQuestsCompleted then
-                                restoreOriginalStates()
-                                _G.MapQuestEnabled = false -- Stop the loop
-                                return
-                            end
-                        end)
-                        
-                        if not success then
-                        end
-                        
-                        -- Final check before next iteration
-                        if not _G.MapQuestEnabled then
-                            break
-                        end
-                        
-                        task.wait(3) -- Check every 3 seconds
-                    end
-                    
-                    -- Final cleanup when loop ends (either disabled or completed)
-                    restoreOriginalStates()
-                end)
-            else
-                -- Immediately set global state and restore when toggle is turned off
-                _G.MapQuestEnabled = false
-                restoreOriginalStates()
-            end
-        end
-    })
-
-    local MapQuestNone = MapQuestSection:Paragraph("MapQuestNone", {
-        Title = "Note",
-        Content = "For the build quest in the kingdom world, the bridge will be built, but this script won't source the resources. Make sure you have at least 3 ancient ticks, 3 fire aura dice, 5 grapes, and 5 apples.",
-        TitleAlignment = "Middle",
-        ContentAlignment = Enum.TextXAlignment.Left
-    })
-
-    local AngelQuestSection = Tabs.Quest:AddSection("Angel Quests")
-
-    angelQuestEnabled = false
-
-    local AngelQuestStatusParagraph = AngelQuestSection:Paragraph("AngelQuestStatus", {
-        Title = "Angel Quest Status",
-        Content = "Loading quest status...",
-        TitleAlignment = "Middle",
-        ContentAlignment = Enum.TextXAlignment.Left
-    })
-
-    updateAngelQuestStatus = function()
-        pcall(function()
-            local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
-            DataController:waitForData()
-            local playerData = DataController:getData()
-            
-            local currentTier = playerData.angelQuestTier or 1
-            local currentProgress = playerData.angelQuestProgress or 0
-            local totalTiers = #AngelQuestsList
-            
-            if currentTier > totalTiers then
-                AngelQuestStatusParagraph:SetValue(string.format("🎉 Completed all %d Angel Quests!", totalTiers))
-            else
-                local questInfo = AngelQuestsList[currentTier]
-                if questInfo then
-                    local requiredAmount = questInfo.quest.amount
-                    local formattedQuestText = questInfo.text:format(requiredAmount)
-                    
-                    local statusText = string.format(
-                        "📋 Tier: %d/%d\n🎯 Quest: %s\n📊 Progress: %d/%d",
-                        currentTier, totalTiers, formattedQuestText, currentProgress, requiredAmount
-                    )
-                    AngelQuestStatusParagraph:SetValue(statusText)
-                else
-                    AngelQuestStatusParagraph:SetValue(string.format("❌ Unable to read quest for Tier %d", currentTier))
-                end
-            end
-        end)
-    end
-
-    getAllAuraDice = function()
-        local options, diceMap = {}, {}
-        pcall(function()
-            local AuraDices = require(ReplicatedStorage.Shared.List.Items.AuraDices)
-            for diceId, diceData in pairs(AuraDices) do
-                local displayName = diceData.name
-                table.insert(options, displayName)
-                diceMap[displayName] = diceId
-            end
-        end)
-        table.sort(options)
-        return options, diceMap
-    end
-
-    local diceOptions, diceIdMap = getAllAuraDice()
-
-    allowedDiceDropdown = AngelQuestSection:Dropdown("AllowedDice", {
-        Title = "Allowed Dice",
-        Description = "Select which dice to use for aura quests (if none selected, uses any owned dice)",
-        Values = diceOptions,
-        Multi = true,
-        Searchable = true,
-        Default = {}
-    })
-
-
-    getCurrentQuestType = function()
-        local success, result = pcall(function()
-            local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
-            DataController:waitForData()
-            local playerData = DataController:getData()
-            
-            if not playerData then 
-                return nil 
-            end
-            
-            local currentTier = playerData.angelQuestTier or 1
-            
-            if currentTier <= #AngelQuestsList then
-                local questData = AngelQuestsList[currentTier]
-                return questData and questData.quest or nil
-            else
-                return nil
-            end
-        end)
-        
-        if success then
-            return result
-        else
-            return nil
-        end
-    end
-
-
-    findBestPotion = function()
-        local playerData = DataController:getData()
-        if not playerData or not playerData.inventory or not playerData.inventory.exclusive then
-            return nil
-        end
-        
-        local bestPotion = nil
-        local highestAmount = 0
-        
-        for itemId, itemData in pairs(playerData.inventory.exclusive) do
-            if itemData.nm and itemData.nm:lower():find("potion") and itemData.am and itemData.am > highestAmount then
-                highestAmount = itemData.am
-                bestPotion = itemId
-            end
-        end
-        
-        return bestPotion
-    end
-
-    getAvailableAuraDice = function()
-        local playerData = DataController:getData()
-        if not playerData then
-            return {}
-        end
-        
-        local selectedDice = allowedDiceDropdown.Value or {}
-        local availableDice = {}
-        
-        if next(selectedDice) == nil then
-            local AuraDices = require(ReplicatedStorage.Shared.List.Items.AuraDices)
-            
-            for diceId, diceData in pairs(AuraDices) do
-                local item = Util.itemUtils.getItemFromName(playerData, diceId)
-                if item and item:getAmount() > 0 then
-                    table.insert(availableDice, diceId)
-                end
-            end
-        else
-            for diceName, isSelected in pairs(selectedDice) do
-                if isSelected then
-                    local diceId = diceIdMap[diceName]
-                    local item = Util.itemUtils.getItemFromName(playerData, diceId)
-                    if item and item:getAmount() > 0 then
-                        table.insert(availableDice, diceId)
-                    end
-                end
-            end
-        end
-        
-        return availableDice
-    end
-
-    setupForQuestType = function(questType)
-        if not questType then 
-            return 
-        end
-        
-        local questName = questType.quest
-        
-        if questName:lower():find("egg") or questName:lower():find("hatch") then
-            
-            local heavenEggFound = false
-            
-            for i, eggOption in ipairs(eggOptions) do
-                if eggOption:lower():find("heaven") then
-                    EggDropdown:SetValue(eggOption)
-                    selectedEgg = displayToEggName[eggOption] or "Heaven"
-                    heavenEggFound = true
-                    break
-                end
-            end
-            
-            if not heavenEggFound then
-            end
-            
-            HatchAmount:SetValue("Max")
-            selectedAmount = hatchAmounts["Max"]
-            
-            if not _G.AutoHatchEnabled then
-                AutoHatch:SetValue(true)
-            else
-            end
-        end
-        
-        if questName == "destroyTree" then
-            AutoEquip:SetValue(true)
-            local neededTrees = {}
-            for _, treeObject in ipairs(SelectTreesDropdown.Values) do
-                local treeName = treeObject.Value:lower()
-                if treeName == "spawn" or treeName == "desert" or treeName == "nuclear" then
-                    neededTrees[treeObject] = true
-                end
-            end
-            SelectTreesDropdown:SetValue(neededTrees)
-            selectedTrees = {}
-            for treeType, isSelected in pairs(neededTrees) do
-                if isSelected then table.insert(selectedTrees, treeType.Value) end
-            end
-            if not autoBreakRunning then
-                AutoCutTreesToggle:SetValue(true)
-            else
-            end
-        end
-        
-        if questName == "craftRing" then
-            task.spawn(function()
-                while angelQuestEnabled do
-                    pcall(function()
-                        local Knit = require(ReplicatedStorage.Packages.Knit)
-                        Knit.GetService("RingService"):craftRing("basicRing", 1)
-                    end)
-                    task.wait(5)
-                end
-            end)
-        end
-        
-        if questName == "usePotions" then
-            task.spawn(function()
-                while angelQuestEnabled do
-                    local potionId = findBestPotion()
-                    if potionId then
-                        pcall(function()
-                            local Knit = require(ReplicatedStorage.Packages.Knit)
-                            Knit.GetService("InventoryService"):useItem(potionId, {use = 1})
-                        end)
-                    else
-                    end
-                    task.wait(2)
-                end
-            end)
-        end
-
-        if questName == "useAuraDice" or questName == "rollOneInAura" then
-            task.spawn(function()
-                while angelQuestEnabled do
-                    local currentQuest = getCurrentQuestType()
-                    if not currentQuest or (currentQuest.quest ~= "useAuraDice" and currentQuest.quest ~= "rollOneInAura") then
-                        break 
-                    end
-                    
-                    local availableDice = getAvailableAuraDice()
-                    if #availableDice > 0 then
-                        local randomDice = availableDice[math.random(1, #availableDice)]
-                        pcall(function()
-                            AuraService:roll(randomDice)
-                        end)
-                    else
-                    end
-                    task.wait(2)
-                end
-            end)
-        end
-    end
-
-    storeOriginalSettings = function()
-        originalEggSelection = selectedEgg
-        originalHatchAmount = selectedAmount
-        
-        originalAutoHatchState = AutoHatch.Value
-
-        originalTreeSelection = {}
-        for treeObject, isSelected in pairs(SelectTreesDropdown.Value) do
-            originalTreeSelection[treeObject] = isSelected
-        end
-        originalAutoCutState = autoBreakRunning
-    end
-
-    restoreOriginalSettings = function()
-        if originalEggSelection then
-            for _, eggOption in ipairs(eggOptions) do
-                if eggOption:find(originalEggSelection) then
-                    EggDropdown:SetValue(eggOption)
-                    selectedEgg = displayToEggName[eggOption] or originalEggSelection
-                    break
-                end
-            end
-        end
-        
-        if originalHatchAmount then
-            local amountText = originalHatchAmount == 1 and "1x" or originalHatchAmount == 3 and "3x" or "Max"
-            HatchAmount:SetValue(amountText)
-            selectedAmount = originalHatchAmount
-        end
-        
-        if not originalAutoHatchState and _G.AutoHatchEnabled then
-            AutoHatch:SetValue(false)
-        end
-        
-        if originalTreeSelection then
-            SelectTreesDropdown:SetValue(originalTreeSelection)
-            
-            selectedTrees = {}
-            for treeType, isSelected in pairs(originalTreeSelection) do
-                if isSelected then table.insert(selectedTrees, treeType.Value) end
-            end
-        end
-        
-        if autoBreakRunning ~= originalAutoCutState then
-            AutoCutTreesToggle:SetValue(originalAutoCutState)
-        end
-    end
-
-    angelQuestToggle = AngelQuestSection:Toggle("AutoCompleteAngelQuest", {
-        Title = "Auto Complete Angel Quest",
-        Description = "Automatically completes the angel quests.",
-        Default = false,
-        Callback = function(enabled)
-            angelQuestEnabled = enabled
-            
-            if enabled then
-                storeOriginalSettings()
-                
-                task.spawn(function()
-                    task.wait(2)
-                    
-                    while angelQuestEnabled do
-                        local currentQuest = getCurrentQuestType()
-                        
-                        if currentQuest then
-                            setupForQuestType(currentQuest)
-                        else
-                        end
-                        
-                        pcall(function()
-                            local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
-                            DataController:waitForData()
-                            local playerData = DataController:getData()
-                            
-                            local currentTier = playerData.angelQuestTier or 1
-                            local currentProgress = playerData.angelQuestProgress or 0
-                            
-                            if currentTier <= #AngelQuestsList then
-                                local questInfo = AngelQuestsList[currentTier]
-                                if questInfo then
-                                    local requiredAmount = questInfo.quest.amount
-                                    
-                                    if currentProgress >= requiredAmount then
-                                        local Knit = require(ReplicatedStorage.Packages.Knit)
-                                        Knit.GetService("QuestService"):claimAngelQuest()
-                                        restoreOriginalSettings()
-                                        task.wait(2)
-                                    end
-                                end
-                            end
-                        end)
-                        
-                        updateAngelQuestStatus()
-                        task.wait(1)
-                    end
-                end)
-            else
-                restoreOriginalSettings()
-            end
-        end
-    })
-
-    task.spawn(function()
-        while true do
-            updateAngelQuestStatus()
-            task.wait(5)
-        end
-    end)
 
     
     local machines = Tabs.Machine:AddSection("Machine Script")
@@ -3125,10 +2163,9 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         ContentAlignment = Enum.TextXAlignment.Left
     })
 
-    -- Shared variables for the entire section
-    local autoCraftDropdown, autoCraftBuildingMap, ResourceStatusParagraph
     local isAutoCraftEnabled = false
     local originalAutoCraftSettings = {}
+    local autoCraftBuildingMap -- This one can stay local as it's not used elsewhere
 
     local function getUnbuiltBuildings()
         local options, buildingMap = {}, {}
@@ -3216,11 +2253,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                             
                             if currentAmount < requiredAmount then
                                 local needed = requiredAmount - currentAmount
-                                if missingResources[itemName] then
-                                    missingResources[itemName] = missingResources[itemName] + needed
-                                else
-                                    missingResources[itemName] = needed
-                                end
+                                missingResources[itemName] = (missingResources[itemName] or 0) + needed
                             end
                         end
                     end
@@ -3234,7 +2267,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
     local function updateResourceStatus()
         local missingResources = getMissingResources()
         
-        if next(missingResources) == nil then
+        if not next(missingResources) then
             if ResourceStatusParagraph then
                 ResourceStatusParagraph:SetValue("✅ All selected buildings can be crafted!")
             end
@@ -3260,121 +2293,84 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                 local treeInfo = zoneData.trees[1]
                 if treeInfo and treeInfo.item then
                     local item = treeInfo.item
-                    local itemName = item.id or item.Name or item.name or 
-                        (typeof(item.getId) == "function" and item:getId()) or 
-                        (typeof(item.getName) == "function" and item:getName())
-                    if itemName and itemName:lower() == woodName:lower() then 
-                        return zoneName 
-                    end
+                    local itemName = item.id or item.Name or item.name or (item.getId and item:getId()) or (item.getName and item:getName())
+                    if itemName and itemName:lower() == woodName:lower() then return zoneName end
                 end
             end
         end
         return "spawn"
     end
 
-    -- Initialize building options
     local autoCraftOptions, initialBuildingMap = getUnbuiltBuildings()
     autoCraftBuildingMap = initialBuildingMap
 
     AutoCraftSection:Button({
-    Title = "Enable Recommended Settings",
-    Description = "Automatically enables: Auto Equip Best Axe, Reduce Cutting Cooldown, and Axe Strength Bypass",
-    Callback = function()
-        -- Enable the 3 recommended toggles using their actual variable names
-        AutoEquip:SetValue(true)
-        lowercooldown:SetValue(true) 
-        BypassStrength:SetValue(true)
-    end})
+        Title = "Enable Recommended Settings",
+        Description = "Automatically enables: Auto Equip Best Axe, Reduce Cutting Cooldown, and Axe Strength Bypass",
+        Callback = function()
+            AutoEquip:SetValue(true)
+            lowercooldown:SetValue(true) 
+            BypassStrength:SetValue(true)
+        end
+    })
 
-    -- Create the dropdown
     autoCraftDropdown = AutoCraftSection:Dropdown("SelectBuildingsToCraft", {
         Title = "Select Buildings to Auto Craft",
-        Description = "Crafts all selected buildings that you can afford and automatically farms trees for needed wood.",
+        Description = "Crafts all selected buildings that you can afford and farms trees for needed wood.",
         Values = autoCraftOptions,
         Multi = true,
         Searchable = true,
         Default = {}
     })
 
-    ResourceStatusParagraph = AutoCraftSection:Paragraph("ResourceStatus", {
-        Title = "Resource Status",
-        Content = "Select buildings to see resource requirements",
-        TitleAlignment = "Middle",
-        ContentAlignment = Enum.TextXAlignment.Left
-    })
-
     autoCraftDropdown:OnChanged(function(value)
         updateResourceStatus()
     end)
 
-    AutoCraftSection:Toggle("AutoCraft", {
+   AutoCraftBuildings = AutoCraftSection:Toggle("AutoCraft", {
         Title = "Auto Craft Selected Buildings",
-        Description = "Automatically crafts selected buildings and farms trees for wood resources. Turn on auto auto equip best axe, reduce cutting cooldown, and axe strength bypass for the best results.",
+        Description = "Automatically crafts selected buildings and farms trees for wood resources.",
         Default = false,
         Callback = function(enabled)
             isAutoCraftEnabled = enabled
-            
             if enabled then
-                -- Store original tree cutting settings
                 originalAutoCraftSettings.selectedTrees = {}
                 for treeObject, isSelected in pairs(SelectTreesDropdown.Value) do
                     originalAutoCraftSettings.selectedTrees[treeObject] = isSelected
                 end
                 originalAutoCraftSettings.autoCutState = autoBreakRunning
-                
-                -- Start auto craft loop
                 task.spawn(function()
                     while isAutoCraftEnabled do
                         pcall(function()
                             local playerData = DataController:getData()
                             if not playerData then return end
-                            
                             local Buildings = require(ReplicatedStorage.Shared.List.Buildings)
                             local selectedBuildings = autoCraftDropdown.Value or {}
-                            
-                            -- Check what we need to farm
                             local neededWoods = {}
                             local canCraftSomething = false
-                            
                             for buildingName, isSelected in pairs(selectedBuildings) do
                                 if isSelected then
                                     local buildingId = autoCraftBuildingMap[buildingName]
                                     local buildingData = Buildings[buildingId]
-                                    
                                     if buildingData then
-                                        -- Check prerequisites first
-                                        local prereqChain = getPrerequisiteChain(buildingId)
-                                        
-                                        -- Try to build prerequisites
-                                        for _, prereqId in ipairs(prereqChain) do
-                                            local isPrereqBuilt = playerData.buildings and playerData.buildings[prereqId] or false
-                                            if not isPrereqBuilt and canAffordBuilding(prereqId) then
+                                        for _, prereqId in ipairs(getPrerequisiteChain(buildingId)) do
+                                            if not (playerData.buildings and playerData.buildings[prereqId]) and canAffordBuilding(prereqId) then
                                                 BuildingService:build(prereqId)
                                                 task.wait(1)
                                                 canCraftSomething = true
                                             end
                                         end
-                                        
-                                        -- Try to build main building
-                                        local isBuilt = playerData.buildings and playerData.buildings[buildingId] or false
-                                        if not isBuilt then
+                                        if not (playerData.buildings and playerData.buildings[buildingId]) then
                                             if canAffordBuilding(buildingId) then
                                                 BuildingService:build(buildingId)
                                                 task.wait(2)
                                                 canCraftSomething = true
-                                            else
-                                                -- Check what resources we need
-                                                if buildingData.required then
-                                                    for _, requiredItem in ipairs(buildingData.required) do
-                                                        local itemName = requiredItem:getName()
-                                                        local requiredAmount = requiredItem:getAmount()
-                                                        
-                                                        local currentItem = Util.itemUtils.getItemFromName(playerData, itemName)
-                                                        local currentAmount = currentItem and currentItem:getAmount() or 0
-                                                        
-                                                        if currentAmount < requiredAmount and itemName:lower():find("wood") then
-                                                            table.insert(neededWoods, itemName)
-                                                        end
+                                            elseif buildingData.required then
+                                                for _, requiredItem in ipairs(buildingData.required) do
+                                                    local itemName = requiredItem:getName()
+                                                    local currentItem = Util.itemUtils.getItemFromName(playerData, itemName)
+                                                    if (currentItem and currentItem:getAmount() or 0) < requiredItem:getAmount() and itemName:lower():find("wood") then
+                                                        table.insert(neededWoods, itemName)
                                                     end
                                                 end
                                             end
@@ -3382,51 +2378,31 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                                     end
                                 end
                             end
-                            
-                            -- Update tree selection for farming
                             if #neededWoods > 0 then
                                 local neededTreeObjects = {}
                                 for _, woodName in ipairs(neededWoods) do
                                     local treeWorld = mapWoodToTreeWorldForCraft(woodName)
                                     for _, treeObject in ipairs(SelectTreesDropdown.Values) do
-                                        if treeObject.Value == treeWorld then
-                                            neededTreeObjects[treeObject] = true
-                                            break
-                                        end
+                                        if treeObject.Value == treeWorld then neededTreeObjects[treeObject] = true; break end
                                     end
                                 end
-                                
                                 SelectTreesDropdown:SetValue(neededTreeObjects)
-                                
-                                -- Enable tree cutting if not already enabled
-                                if not autoBreakRunning then
-                                    AutoCutTreesToggle:SetValue(true)
-                                end
-                            elseif canCraftSomething then
-                                -- Stop tree cutting if we don't need wood and crafted something
-                                if autoBreakRunning then
-                                    AutoCutTreesToggle:SetValue(false)
-                                end
+                                if not autoBreakRunning then AutoCutTreesToggle:SetValue(true) end
+                            elseif canCraftSomething and autoBreakRunning then
+                                AutoCutTreesToggle:SetValue(false)
                             end
                         end)
-                        
-                        task.wait(3) -- Check every 3 seconds
+                        task.wait(3)
                     end
                 end)
-                
-            else 
-                -- Restore original settings
-                if next(originalAutoCraftSettings) then
-                    SelectTreesDropdown:SetValue(originalAutoCraftSettings.selectedTrees)
-                    
-                    if autoBreakRunning ~= originalAutoCraftSettings.autoCutState then
-                        AutoCutTreesToggle:SetValue(originalAutoCraftSettings.autoCutState)
-                    end
+            elseif next(originalAutoCraftSettings) then
+                SelectTreesDropdown:SetValue(originalAutoCraftSettings.selectedTrees)
+                if autoBreakRunning ~= originalAutoCraftSettings.autoCutState then
+                    AutoCutTreesToggle:SetValue(originalAutoCraftSettings.autoCutState)
                 end
             end
         end
     })
-
 
     AutoCraftSection:Button({
         Title = "Refresh Building List",
@@ -3451,6 +2427,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
             task.wait(5)
         end
     end)
+
 
     explorerroom = Tabs.Craft:AddSection("Scattered Items")
 
@@ -3578,6 +2555,1004 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
             end
         end
     })
+
+        
+    local MapQuestSection = Tabs.Quest:AddSection("Map Quests")
+
+    local MapQuestStatusParagraph = MapQuestSection:Paragraph("MapQuestStatus", {
+        Title = "Map Quest Progress",
+        Content = "Loading map quest status...",
+        TitleAlignment = "Middle",
+        ContentAlignment = Enum.TextXAlignment.Left
+    })
+
+    local updateMapQuestStatus = function()
+        pcall(function()
+            local Maps = require(ReplicatedStorage.Shared.List.Maps)
+            DataController:waitForData()
+            local playerData = DataController:getData()
+            
+            if not playerData then
+                MapQuestStatusParagraph:SetValue("❌ Could not get player data")
+                return
+            end
+            
+            -- Find highest map number
+            local highestMap = 0
+            if playerData.maps then
+                for mapNumber, _ in pairs(playerData.maps) do
+                    if tonumber(mapNumber) and tonumber(mapNumber) > highestMap then
+                        highestMap = tonumber(mapNumber)
+                    end
+                end
+            end
+            
+            -- Next map to unlock
+            local nextMapNumber = highestMap + 1
+            local nextMap = Maps[nextMapNumber]
+            
+            local statusLines = {}
+            table.insert(statusLines, string.format("🏆 Best Map Owned: %d", highestMap))
+            
+            if nextMap then
+                table.insert(statusLines, string.format("🎯 Next Map: Map %d - %s", nextMapNumber, nextMap.name))
+                table.insert(statusLines, "")
+                
+                if nextMap.quests then
+                    table.insert(statusLines, "📋 Quest Progress:")
+                    
+                    for questIndex, questData in pairs(nextMap.quests) do
+                        local questType = questData.quest
+                        local required = questData.amount
+                        local questName = questData.name
+                        
+                        -- Get progress from mapQuests
+                        local currentProgress = playerData.mapQuests[questIndex] or 0
+                        
+                        -- Cap progress at required amount for display
+                        local displayProgress = math.min(currentProgress, required)
+                        
+                        local isCompleted = currentProgress >= required
+                        local status = isCompleted and "✅" or "❌"
+                        local percentage = math.floor((displayProgress / required) * 100)
+                        
+                        -- Show quest info
+                        local displayText = questType
+                        if questName then
+                            displayText = questType .. " (" .. questName .. ")"
+                        end
+                        
+                        table.insert(statusLines, string.format("%s %s", status, displayText))
+                        table.insert(statusLines, string.format("   %s/%s (%d%%)", 
+                            Functions.suffixes(displayProgress),
+                            Functions.suffixes(required),
+                            percentage
+                        ))
+                    end
+                end
+            else
+                table.insert(statusLines, "🎉 ALL MAPS UNLOCKED!")
+            end
+            
+            MapQuestStatusParagraph:SetValue(table.concat(statusLines, "\n"))
+        end)
+    end
+
+ 
+    -- Update map quest status every 5 seconds
+    task.spawn(function()
+        while true do
+            updateMapQuestStatus()
+            task.wait(5)
+        end
+    end)
+
+    local autoUnlockWallThread = nil
+
+    local function tableLength(t)
+        local count = 0
+        for _ in pairs(t) do count = count + 1 end
+        return count
+    end
+
+    local function handleAutoUnlockWalls(enabled)
+        -- Stop previous loop if toggle changes
+        if autoUnlockWallThread then
+            task.cancel(autoUnlockWallThread)
+            autoUnlockWallThread = nil
+        end
+
+        if enabled then
+            autoUnlockWallThread = task.spawn(function()
+                while _G.MapQuestEnabled do
+                    pcall(function()
+                        local playerData = DataController:getData()
+                        if not playerData then return end
+
+                        local MapsList = require(ReplicatedStorage.Shared.List.Maps)
+                        local HRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if not HRP then return end
+
+                        -- Scan all walls
+                        for _, wall in pairs(workspace:GetDescendants()) do
+                            if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
+                                local mapId = wall:GetAttribute("mapId")
+                                local mapData = MapsList[mapId]
+
+                                -- Only act on solid walls that we haven't unlocked yet and have quests
+                                if wall.CanCollide and mapData and mapData.quests and not table.find(playerData.maps or {}, mapId) then
+                                    local totalQuests = tableLength(mapData.quests)
+                                    local completedQuests = 0
+
+                                    for questId, questInfo in pairs(mapData.quests) do
+                                        if (playerData.mapQuests[questId] or 0) >= questInfo.amount then
+                                            completedQuests = completedQuests + 1
+                                        end
+                                    end
+
+                                    -- If all quests complete, teleport & unlock
+                                    if completedQuests >= totalQuests then
+
+                                        -- Teleport to the wall
+                                        local wallPosition = wall.Position or (wall:IsA("Model") and wall:GetPivot().Position)
+                                        if wallPosition then
+                                            HRP.CFrame = CFrame.new(wallPosition + Vector3.new(0, 5, 0))
+                                            task.wait(0.2)
+                                        end
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(5)
+                end
+            end)
+        end
+    end
+
+    -- Ensure HumanoidRootPart exists
+    local function getHRP()
+        if player.Character then
+            return player.Character:FindFirstChild("HumanoidRootPart")
+        else
+            player.CharacterAdded:Wait()
+            return player.Character:WaitForChild("HumanoidRootPart")
+        end
+    end
+
+    local HRP = getHRP()
+
+    -- Utility
+    local function tableLength(t)
+        local count = 0
+        if t then
+            for _ in pairs(t) do count = count + 1 end
+        end
+        return count
+    end
+
+    -- Check if all quests for a map are completed
+    local function areAllQuestsCompleted(mapData, playerData)
+        if not mapData or not mapData.quests then return false, 0, 0 end
+        local totalQuests = tableLength(mapData.quests)
+        if totalQuests == 0 then return false, 0, 0 end
+
+        local completed = 0
+        for questId, questInfo in pairs(mapData.quests) do
+            local progress = (playerData.mapQuests and playerData.mapQuests[questId]) or 0
+            if progress >= (questInfo.amount or 0) then
+                completed = completed + 1
+            end
+        end
+        return completed >= totalQuests, completed, totalQuests
+    end
+
+    -- Teleport above a wall
+    local function teleportToWall(wall)
+        if not wall or not wall:IsDescendantOf(Workspace) then return end
+        local pos
+        if wall:IsA("BasePart") then
+            pos = wall.Position
+        elseif wall.GetPivot then
+            pos = wall:GetPivot().Position
+        end
+        if pos then
+            local HRP = getHRP()
+            if HRP then
+                HRP.CFrame = CFrame.new(pos + Vector3.new(0,5,0))
+                task.wait(0.15)
+            end
+        end
+    end
+
+    -- Unlock a wall (animation)
+    local function unlockWall(wall, mapId)
+        pcall(function()
+            MapController:hideWall(wall)
+            MapController:unlockAnimation(wall, mapId)
+        end)
+    end
+
+    -- Main sequential unlock function
+    local function scanWallsSequentially()
+        local playerData = DataController:getData()
+        if not playerData then return end
+
+        local MapsList = require(ReplicatedStorage.Shared.List.Maps)
+        local walls = {}
+
+        -- Collect walls with mapId
+        for _, wall in ipairs(Workspace:GetDescendants()) do
+            if wall:FindFirstChild("UnlockGui") and wall:GetAttribute("mapId") then
+                local mapId = tonumber(wall:GetAttribute("mapId"))
+                local mapData = MapsList[mapId]
+                if mapData then
+                    table.insert(walls, {wall = wall, mapId = mapId, mapData = mapData})
+                end
+            end
+        end
+
+        -- Sort by mapId ascending
+        table.sort(walls, function(a,b) return a.mapId < b.mapId end)
+
+        local highestUnlockedMap = 0
+        for _, id in ipairs(playerData.maps or {}) do
+            if id > highestUnlockedMap then
+                highestUnlockedMap = id
+            end
+        end
+
+        for _, entry in ipairs(walls) do
+            local wall = entry.wall
+            local mapId = entry.mapId
+            local mapData = entry.mapData
+
+            -- Skip walls behind the last unlocked map
+            if mapId > highestUnlockedMap + 1 then
+                -- Need to unlock previous first
+                break
+            end
+
+            -- Check quests
+            local completedAll, _, _ = areAllQuestsCompleted(mapData, playerData)
+            if wall.CanCollide and completedAll then
+                print("[MapWall] Teleporting to wall:", wall:GetFullName())
+                teleportToWall(wall)
+                task.wait(0.2)
+                unlockWall(wall, mapId)
+                -- Update highestUnlockedMap to current
+                highestUnlockedMap = mapId
+            end
+        end
+    end
+
+    -- Auto-unlock loop
+    local autoUnlockThread
+    local function handleAutoUnlock(enabled)
+        if autoUnlockThread then
+            task.cancel(autoUnlockThread)
+            autoUnlockThread = nil
+        end
+
+        if enabled then
+            autoUnlockThread = task.spawn(function()
+                while _G.MapQuestEnabled do
+                    pcall(scanWallsSequentially)
+                    task.wait(5)
+                end
+            end)
+        end
+    end
+
+    -- Listen for new walls dynamically
+    Workspace.DescendantAdded:Connect(function(desc)
+        if _G.MapQuestEnabled and desc:FindFirstChild("UnlockGui") and desc:GetAttribute("mapId") then
+            pcall(scanWallsSequentially)
+        end
+    end)
+
+
+
+    -- Toggle in GUI
+    MapQuestSection:Toggle("AutoCompleteMapQuest", {
+        Title = "Auto Complete Map Quest",
+        Description = "Automatically completes map quests and unlocks walls sequentially.",
+        Default = false,
+        Callback = function(enabled)
+            task.spawn(function()
+                _G.MapQuestEnabled = enabled
+                handleAutoUnlock(_G.MapQuestEnabled)
+                
+                -- Store original states when enabling
+                local originalStates = {
+                    autoClickEnabled = AutoClick.Value,
+                    autoRebirthEnabled = AutoRebirth.Value,
+                    selectedRebirthValue = rebirthDropdown.Value,
+                    selectedEggValue = EggDropdown.Value,
+                    selectedAmountValue = HatchAmount.Value,
+                    autoHatchEnabled = AutoHatch.Value,
+                    craftAllToggleState = CraftAllToggle.Value,
+                    selectedFarmsForClaim = claimDropdown.Value or {},
+                    autoClaimFarmsEnabled = AutoClaimFarm.Value,
+                    selectedTreesValue = SelectTreesDropdown.Value,
+                    autoCutTreesEnabled = AutoCutTreesToggle.Value,
+                    selectedPetsValue = PetDropdown.Value,
+                    autoBuyFarmsEnabled = BuyFarm.Value,
+                    selectedFarmsToBuy = farmDropdown.Value or {},
+                    AutoCraftBuildings = AutoCraftBuildings.Value,
+                    autoCraftDropdown = autoCraftDropdown.Value
+                }
+                
+                local function restoreOriginalStates()
+                    pcall(function()
+                        AutoClick:SetValue(originalStates.autoClickEnabled)
+                        AutoRebirth:SetValue(originalStates.autoRebirthEnabled)
+                        rebirthDropdown:SetValue(originalStates.selectedRebirthValue)
+                        EggDropdown:SetValue(originalStates.selectedEggValue)
+                        farmDropdown:SetValue(originalStates.selectedFarmsToBuy)
+                        HatchAmount:SetValue(originalStates.selectedAmountValue)
+                        AutoHatch:SetValue(originalStates.autoHatchEnabled)
+                        CraftAllToggle:SetValue(originalStates.craftAllToggleState)
+                        claimDropdown:SetValue(originalStates.selectedFarmsForClaim)
+                        AutoClaimFarm:SetValue(originalStates.autoClaimFarmsEnabled)
+                        SelectTreesDropdown:SetValue(originalStates.selectedTreesValue)
+                        AutoCutTreesToggle:SetValue(originalStates.autoCutTreesEnabled)
+                        BuyFarm:SetValue(originalStates.autoBuyFarmsEnabled)
+                        PetDropdown:SetValue(originalStates.selectedPetsValue)
+                        AutoCraftBuildings:SetValue(originalStates.AutoCraftBuildings)
+                        autoCraftDropdown:SetValue(originalStates.autoCraftDropdown)
+                    end)
+                end
+                
+                if enabled then
+                    if AutoClick and not AutoClick.Value then
+                        AutoClick:SetValue(true)
+                    end
+
+                    task.spawn(function()
+                        while _G.MapQuestEnabled do
+                            local success = pcall(function()
+                                if not _G.MapQuestEnabled then return end
+                                
+                                local Maps = require(ReplicatedStorage.Shared.List.Maps)
+                                local playerData = DataController:getData()
+                                
+                                if not playerData then return end
+                                
+                                AutoHatch:SetValue(false)
+                                AutoRebirth:SetValue(false)
+                                CraftAllToggle:SetValue(false)
+                                AutoClaimFarm:SetValue(false)
+                                AutoCutTreesToggle:SetValue(false)
+                                BuyFarm:SetValue(false)
+
+                                local highestMap = 0
+                                if playerData.maps then
+                                    for mapNumber, _ in pairs(playerData.maps) do
+                                        if tonumber(mapNumber) and tonumber(mapNumber) > highestMap then
+                                            highestMap = tonumber(mapNumber)
+                                        end
+                                    end
+                                end
+                                
+                                local nextMapNumber = highestMap + 1
+                                local nextMap = Maps[nextMapNumber]
+                                
+                                local allQuestsCompleted = true
+                                
+                                if nextMap and nextMap.quests then
+                                    for questIndex, questData in pairs(nextMap.quests) do
+                                        if not _G.MapQuestEnabled then return end
+                                        
+                                        local currentProgress = playerData.mapQuests[questIndex] or 0
+                                        if currentProgress >= questData.amount then
+                                            continue
+                                        else
+                                            allQuestsCompleted = false
+                                        end
+                                        
+                                        -- From here, we are only processing the CURRENT UNFINISHED quest
+                                        local questType = questData.quest
+                                        local required = questData.amount
+                                        local questName = questData.name
+                                        
+                                        if questType == "rebirths" then
+                                            
+                                            local currentRebirths = playerData.rebirths or 0
+                                            local rebirthsNeeded = required - currentRebirths
+                                            local bestOptionDisplay = nil
+
+                                            if rebirthsNeeded > 0 then
+                                                for _, option in ipairs(rebirthOptions) do
+                                                    if option.amount >= rebirthsNeeded then
+                                                        bestOptionDisplay = option.display
+                                                        break 
+                                                    end
+                                                end
+                                            end
+
+                                            if bestOptionDisplay then
+                                                rebirthDropdown:SetValue(bestOptionDisplay)
+                                            else
+                                                rebirthDropdown:SetValue("Max Unlocked")
+                                            end
+                                            AutoRebirth:SetValue(true)
+                                        
+                                        elseif questType == "openEgg" and questName then
+                                            local targetEggName = questName
+                                            for _, eggOption in ipairs(eggOptions) do
+                                                if eggOption:lower():find(targetEggName:lower()) then
+                                                    EggDropdown:SetValue(eggOption)
+                                                    break
+                                                end
+                                            end
+                                            HatchAmount:SetValue("Max")
+                                            AutoHatch:SetValue(true)
+
+                                        elseif questType == "craftAnyGalaxyPets" then
+                                            local previousMapNumber = nextMapNumber - 1
+                                            local previousMap = Maps[previousMapNumber]
+                                            local previousWorldEggName = (previousMap and previousMap.name) or nextMap.name
+                                            
+                                            for _, eggOption in ipairs(eggOptions) do
+                                                if eggOption:lower():find(previousWorldEggName:lower()) then
+                                                    EggDropdown:SetValue(eggOption)
+                                                    break
+                                                end
+                                            end
+                                            
+                                            HatchAmount:SetValue("Max")
+                                            AutoHatch:SetValue(true)
+                                            
+                                            task.wait(2)
+                                            PetDropdown:SetValues(getPlayerPetOptions())
+                                            local playerPetOptions = getPlayerPetOptions()
+                                            local galaxyCraftablePets = {}
+                                            
+                                            local Eggs = require(ReplicatedStorage.Shared.List.Pets.Eggs)
+                                            local previousEggData = Eggs[previousWorldEggName]
+                                            local previousWorldPetNames = {}
+                                            if previousEggData and previousEggData.pets then
+                                                for petName, _ in pairs(previousEggData.pets) do table.insert(previousWorldPetNames, petName) end
+                                            end
+                                            
+                                            for _, displayName in ipairs(playerPetOptions) do
+                                                for _, worldPetName in ipairs(previousWorldPetNames) do
+                                                    if displayName:find(worldPetName) then
+                                                        galaxyCraftablePets[displayName] = true
+                                                        break
+                                                    end
+                                                end
+                                            end
+
+                                            local toxicPetNames = {}
+                                            if playerData.maps then
+                                                for mapNumber, _ in pairs(playerData.maps) do
+                                                    local mapNum = tonumber(mapNumber)
+                                                    if mapNum and mapNum >= 17 then
+                                                        local mapData = Maps[mapNum]
+                                                        if mapData and mapData.name then
+                                                            local worldEggData = Eggs[mapData.name]
+                                                            if worldEggData and worldEggData.pets then
+                                                                for petName, chance in pairs(worldEggData.pets) do
+                                                                    if chance > 0.01 then table.insert(toxicPetNames, petName) end
+                                                                end
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                            end
+
+                                            for _, displayName in ipairs(playerPetOptions) do
+                                                for _, toxicPetName in ipairs(toxicPetNames) do
+                                                    if displayName:find("Toxic") and displayName:find(toxicPetName) then
+                                                        galaxyCraftablePets[displayName] = true
+                                                        break
+                                                    end
+                                                end
+                                            end
+                                            
+                                            if next(galaxyCraftablePets) and PetDropdown then
+                                                PetDropdown:SetValue(galaxyCraftablePets)
+                                                CraftAllToggle:SetValue(true)
+                                            end
+                                            
+                                        elseif questType == "hatchPet" and questName then
+                                            local previousMapNumber = nextMapNumber - 1
+                                            local previousMap = Maps[previousMapNumber]
+                                            local worldName = (previousMap and previousMap.name) or "Spawn"
+                                            
+                                            for _, eggOption in ipairs(eggOptions) do
+                                                if eggOption:lower():find(worldName:lower()) then
+                                                    EggDropdown:SetValue(eggOption)
+                                                    break
+                                                end
+                                            end
+                                            
+                                            HatchAmount:SetValue("Max")
+                                            AutoHatch:SetValue(true)
+                
+                                        elseif questType == "useAuraDice" then
+                                            local bestDiceId, maxAmount = nil, 0
+                                            if playerData.inventory and playerData.inventory.auraDice then
+                                                for itemId, itemData in pairs(playerData.inventory.auraDice) do
+                                                    if (itemData.am or 0) > maxAmount then
+                                                        maxAmount = itemData.am
+                                                        bestDiceId = itemData.nm or itemId
+                                                    end
+                                                end
+                                            end
+                                            if bestDiceId and maxAmount > 0 then
+                                                pcall(function() AuraService:roll(bestDiceId) end)
+                                                task.wait(2)
+                                            end
+                                            
+                                        elseif questType == "collectFruits" then
+                                            rebirthDropdown:SetValue("Max Unlocked")
+                                            AutoRebirth:SetValue(true)
+                                            
+                                            local allFarms = {}
+                                            for _, farmName in ipairs(farmOptions) do allFarms[farmName] = true end
+                                            farmDropdown:SetValue(allFarms)
+                                            BuyFarm:SetValue(true)
+                                            
+                                            local allClaimFarms = {}
+                                            for _, farmName in ipairs(claimFarmOptions) do allClaimFarms[farmName] = true end
+                                            claimDropdown:SetValue(allClaimFarms)
+                                            AutoClaimFarm:SetValue(true)
+                                        
+                                        elseif questType == "building" and questName and (questName:lower():find("bridge") or questName:lower():find("wooden")) then
+                                                print("[AutoQuest] Found 'Wooden Bridge' quest. Setting up auto-crafting.")
+                                                
+                                                local bridgeOptionName = "Wooden Bridge"
+                                                local foundOption = false
+                                                for _, option in ipairs(autoCraftDropdown.Values) do
+                                                    if option == bridgeOptionName then
+                                                        foundOption = true
+                                                        break
+                                                    end
+                                                end
+
+                                                if foundOption then
+                                                    print("  - Found 'Wooden Bridge' in dropdown options.")
+                                                    print("    >> ACTION: Selecting 'Wooden Bridge' and enabling Auto Craft.")
+                                                    autoCraftDropdown:SetValue({[bridgeOptionName] = true})
+                                                    AutoCraftBuildings:SetValue(true)
+                                                else
+                                                    warn("[AutoQuest] Could not find 'Wooden Bridge' in the Auto Craft dropdown list.")
+                                                end
+                                                
+                                        elseif questType == "usePotions" then
+                                            local bestPotionId, maxAmount = nil, 0
+                                            if playerData.inventory and playerData.inventory.potion then
+                                                for itemId, itemData in pairs(playerData.inventory.potion) do
+                                                    if (itemData.am or 0) > maxAmount and not (itemData.nm or ""):lower():find("mega") then
+                                                        maxAmount = itemData.am
+                                                        bestPotionId = itemId
+                                                    end
+                                                end
+                                            end
+                                            if bestPotionId and maxAmount > 0 then
+                                                local potionsNeeded = math.min(required - currentProgress, maxAmount)
+                                                if potionsNeeded > 0 then
+                                                    pcall(function() Knit.GetService("InventoryService"):useItem(bestPotionId, {use = potionsNeeded}) end)
+                                                    task.wait(2)
+                                                end
+                                            end
+                                            
+                                        elseif questType == "useMegaPotions" then
+                                            local bestMegaPotionId, maxAmount = nil, 0
+                                            if playerData.inventory and playerData.inventory.potion then
+                                                for itemId, itemData in pairs(playerData.inventory.potion) do
+                                                    if (itemData.am or 0) > maxAmount and (itemData.nm or ""):lower():find("mega") then
+                                                        maxAmount = itemData.am
+                                                        bestMegaPotionId = itemId
+                                                    end
+                                                end
+                                            end
+                                            if bestMegaPotionId and maxAmount > 0 then
+                                                local megaPotionsNeeded = math.min(required - currentProgress, maxAmount)
+                                                if megaPotionsNeeded > 0 then
+                                                    pcall(function() Knit.GetService("InventoryService"):useItem(bestMegaPotionId, {use = megaPotionsNeeded}) end)
+                                                    task.wait(2)
+                                                end
+                                            end
+                                        end
+                                        break
+                                    end
+                                else
+                                    allQuestsCompleted = true
+                                end
+                                
+                                if allQuestsCompleted then
+                                    restoreOriginalStates()
+                                    _G.MapQuestEnabled = false
+                                    return
+                                end
+                            end)
+                            
+                            if not success then end
+                            if not _G.MapQuestEnabled then break end
+                            task.wait(3)
+                        end
+                        
+                        restoreOriginalStates()
+                    end)
+                else
+                    _G.MapQuestEnabled = false
+                    restoreOriginalStates()
+                end
+            end)
+        end
+    })
+    
+    local MapQuestNone = MapQuestSection:Paragraph("MapQuestNone", {
+        Title = "Note",
+        Content = "For the build quest in the kingdom world, the bridge will be built, but this script won't source the resources. Make sure you have at least 3 ancient ticks, 3 fire aura dice, 5 grapes, and 5 apples.",
+        TitleAlignment = "Middle",
+        ContentAlignment = Enum.TextXAlignment.Left
+    })
+
+    local AngelQuestSection = Tabs.Quest:AddSection("Angel Quests")
+
+    angelQuestEnabled = false
+
+    local AngelQuestStatusParagraph = AngelQuestSection:Paragraph("AngelQuestStatus", {
+        Title = "Angel Quest Status",
+        Content = "Loading quest status...",
+        TitleAlignment = "Middle",
+        ContentAlignment = Enum.TextXAlignment.Left
+    })
+
+    updateAngelQuestStatus = function()
+        pcall(function()
+            local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
+            DataController:waitForData()
+            local playerData = DataController:getData()
+            
+            local currentTier = playerData.angelQuestTier or 1
+            local currentProgress = playerData.angelQuestProgress or 0
+            local totalTiers = #AngelQuestsList
+            
+            if currentTier > totalTiers then
+                AngelQuestStatusParagraph:SetValue(string.format("🎉 Completed all %d Angel Quests!", totalTiers))
+            else
+                local questInfo = AngelQuestsList[currentTier]
+                if questInfo then
+                    local requiredAmount = questInfo.quest.amount
+                    local formattedQuestText = questInfo.text:format(requiredAmount)
+                    
+                    local statusText = string.format(
+                        "📋 Tier: %d/%d\n🎯 Quest: %s\n📊 Progress: %d/%d",
+                        currentTier, totalTiers, formattedQuestText, currentProgress, requiredAmount
+                    )
+                    AngelQuestStatusParagraph:SetValue(statusText)
+                else
+                    AngelQuestStatusParagraph:SetValue(string.format("❌ Unable to read quest for Tier %d", currentTier))
+                end
+            end
+        end)
+    end
+
+    getAllAuraDice = function()
+        local options, diceMap = {}, {}
+        pcall(function()
+            local AuraDices = require(ReplicatedStorage.Shared.List.Items.AuraDices)
+            for diceId, diceData in pairs(AuraDices) do
+                local displayName = diceData.name
+                table.insert(options, displayName)
+                diceMap[displayName] = diceId
+            end
+        end)
+        table.sort(options)
+        return options, diceMap
+    end
+
+    local diceOptions, diceIdMap = getAllAuraDice()
+
+    allowedDiceDropdown = AngelQuestSection:Dropdown("AllowedDice", {
+        Title = "Allowed Dice",
+        Description = "Select which dice to use for aura quests (if none selected, uses any owned dice)",
+        Values = diceOptions,
+        Multi = true,
+        Searchable = true,
+        Default = {}
+    })
+
+
+    getCurrentQuestType = function()
+        local success, result = pcall(function()
+            local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
+            DataController:waitForData()
+            local playerData = DataController:getData()
+            
+            if not playerData then 
+                return nil 
+            end
+            
+            local currentTier = playerData.angelQuestTier or 1
+            
+            if currentTier <= #AngelQuestsList then
+                local questData = AngelQuestsList[currentTier]
+                return questData and questData.quest or nil
+            else
+                return nil
+            end
+        end)
+        
+        if success then
+            return result
+        else
+            return nil
+        end
+    end
+
+
+    findBestPotion = function()
+        local playerData = DataController:getData()
+        if not playerData or not playerData.inventory or not playerData.inventory.exclusive then
+            return nil
+        end
+        
+        local bestPotion = nil
+        local highestAmount = 0
+        
+        for itemId, itemData in pairs(playerData.inventory.exclusive) do
+            if itemData.nm and itemData.nm:lower():find("potion") and itemData.am and itemData.am > highestAmount then
+                highestAmount = itemData.am
+                bestPotion = itemId
+            end
+        end
+        
+        return bestPotion
+    end
+
+    getAvailableAuraDice = function()
+        local playerData = DataController:getData()
+        if not playerData then
+            return {}
+        end
+        
+        local selectedDice = allowedDiceDropdown.Value or {}
+        local availableDice = {}
+        
+        if next(selectedDice) == nil then
+            local AuraDices = require(ReplicatedStorage.Shared.List.Items.AuraDices)
+            
+            for diceId, diceData in pairs(AuraDices) do
+                local item = Util.itemUtils.getItemFromName(playerData, diceId)
+                if item and item:getAmount() > 0 then
+                    table.insert(availableDice, diceId)
+                end
+            end
+        else
+            for diceName, isSelected in pairs(selectedDice) do
+                if isSelected then
+                    local diceId = diceIdMap[diceName]
+                    local item = Util.itemUtils.getItemFromName(playerData, diceId)
+                    if item and item:getAmount() > 0 then
+                        table.insert(availableDice, diceId)
+                    end
+                end
+            end
+        end
+        
+        return availableDice
+    end
+
+    setupForQuestType = function(questType)
+        if not questType then 
+            return 
+        end
+        
+        local questName = questType.quest
+        
+        if questName:lower():find("egg") or questName:lower():find("hatch") then
+            
+            local heavenEggFound = false
+            
+            for i, eggOption in ipairs(eggOptions) do
+                if eggOption:lower():find("heaven") then
+                    EggDropdown:SetValue(eggOption)
+                    selectedEgg = displayToEggName[eggOption] or "Heaven"
+                    heavenEggFound = true
+                    break
+                end
+            end
+            
+            if not heavenEggFound then
+            end
+            
+            HatchAmount:SetValue("Max")
+            selectedAmount = hatchAmounts["Max"]
+            
+            if not _G.AutoHatchEnabled then
+                AutoHatch:SetValue(true)
+            else
+            end
+        end
+        
+        if questName == "destroyTree" then
+            AutoEquip:SetValue(true)
+            local neededTrees = {}
+            for _, treeObject in ipairs(SelectTreesDropdown.Values) do
+                local treeName = treeObject.Value:lower()
+                if treeName == "spawn" or treeName == "desert" or treeName == "nuclear" then
+                    neededTrees[treeObject] = true
+                end
+            end
+            SelectTreesDropdown:SetValue(neededTrees)
+            selectedTrees = {}
+            for treeType, isSelected in pairs(neededTrees) do
+                if isSelected then table.insert(selectedTrees, treeType.Value) end
+            end
+            if not autoBreakRunning then
+                AutoCutTreesToggle:SetValue(true)
+            else
+            end
+        end
+        
+        if questName == "craftRing" then
+            task.spawn(function()
+                while angelQuestEnabled do
+                    pcall(function()
+                        local Knit = require(ReplicatedStorage.Packages.Knit)
+                        Knit.GetService("RingService"):craftRing("basicRing", 1)
+                    end)
+                    task.wait(5)
+                end
+            end)
+        end
+        
+        if questName == "usePotions" then
+            task.spawn(function()
+                while angelQuestEnabled do
+                    local potionId = findBestPotion()
+                    if potionId then
+                        pcall(function()
+                            local Knit = require(ReplicatedStorage.Packages.Knit)
+                            Knit.GetService("InventoryService"):useItem(potionId, {use = 1})
+                        end)
+                    else
+                    end
+                    task.wait(2)
+                end
+            end)
+        end
+
+        if questName == "useAuraDice" or questName == "rollOneInAura" then
+            task.spawn(function()
+                while angelQuestEnabled do
+                    local currentQuest = getCurrentQuestType()
+                    if not currentQuest or (currentQuest.quest ~= "useAuraDice" and currentQuest.quest ~= "rollOneInAura") then
+                        break 
+                    end
+                    
+                    local availableDice = getAvailableAuraDice()
+                    if #availableDice > 0 then
+                        local randomDice = availableDice[math.random(1, #availableDice)]
+                        pcall(function()
+                            AuraService:roll(randomDice)
+                        end)
+                    else
+                    end
+                    task.wait(2)
+                end
+            end)
+        end
+    end
+
+    storeOriginalSettings = function()
+        originalEggSelection = selectedEgg
+        originalHatchAmount = selectedAmount
+        
+        originalAutoHatchState = AutoHatch.Value
+
+        originalTreeSelection = {}
+        for treeObject, isSelected in pairs(SelectTreesDropdown.Value) do
+            originalTreeSelection[treeObject] = isSelected
+        end
+        originalAutoCutState = autoBreakRunning
+    end
+
+    restoreOriginalSettings = function()
+        if originalEggSelection then
+            for _, eggOption in ipairs(eggOptions) do
+                if eggOption:find(originalEggSelection) then
+                    EggDropdown:SetValue(eggOption)
+                    selectedEgg = displayToEggName[eggOption] or originalEggSelection
+                    break
+                end
+            end
+        end
+        
+        if originalHatchAmount then
+            local amountText = originalHatchAmount == 1 and "1x" or originalHatchAmount == 3 and "3x" or "Max"
+            HatchAmount:SetValue(amountText)
+            selectedAmount = originalHatchAmount
+        end
+        
+        if not originalAutoHatchState and _G.AutoHatchEnabled then
+            AutoHatch:SetValue(false)
+        end
+        
+        if originalTreeSelection then
+            SelectTreesDropdown:SetValue(originalTreeSelection)
+            
+            selectedTrees = {}
+            for treeType, isSelected in pairs(originalTreeSelection) do
+                if isSelected then table.insert(selectedTrees, treeType.Value) end
+            end
+        end
+        
+        if autoBreakRunning ~= originalAutoCutState then
+            AutoCutTreesToggle:SetValue(originalAutoCutState)
+        end
+    end
+
+    angelQuestToggle = AngelQuestSection:Toggle("AutoCompleteAngelQuest", {
+        Title = "Auto Complete Angel Quest",
+        Description = "Automatically completes the angel quests.",
+        Default = false,
+        Callback = function(enabled)
+            task.spawn(function()
+                angelQuestEnabled = enabled
+                
+                if enabled then
+                    storeOriginalSettings()
+                    
+                    task.spawn(function()
+                        task.wait(2)
+                        
+                        while angelQuestEnabled do
+                            local currentQuest = getCurrentQuestType()
+                            
+                            if currentQuest then
+                                setupForQuestType(currentQuest)
+                            else
+                            end
+                            
+                            pcall(function()
+                                local AngelQuestsList = require(ReplicatedStorage.Shared.List.AngelQuests)
+                                DataController:waitForData()
+                                local playerData = DataController:getData()
+                                
+                                local currentTier = playerData.angelQuestTier or 1
+                                local currentProgress = playerData.angelQuestProgress or 0
+                                
+                                if currentTier <= #AngelQuestsList then
+                                    local questInfo = AngelQuestsList[currentTier]
+                                    if questInfo then
+                                        local requiredAmount = questInfo.quest.amount
+                                        
+                                        if currentProgress >= requiredAmount then
+                                            local Knit = require(ReplicatedStorage.Packages.Knit)
+                                            Knit.GetService("QuestService"):claimAngelQuest()
+                                            restoreOriginalSettings()
+                                            task.wait(2)
+                                        end
+                                    end
+                                end
+                            end)
+                            
+                            updateAngelQuestStatus()
+                            task.wait(1)
+                        end
+                    end)
+                else
+                    restoreOriginalSettings()
+                end
+            end)
+        end
+        })
+
+    task.spawn(function()
+        while true do
+            updateAngelQuestStatus()
+            task.wait(5)
+        end
+    end)
 
 
     ClaimSection = Tabs.Claim:AddSection("Claim/Collect")
@@ -3960,6 +3935,28 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                     end
                 end)
             end
+        end
+    })
+
+    local TutorialSection = Tabs.Misc:AddSection("Tutorial")
+
+    TutorialSection:AddButton({
+        Title = "Complete Tutorial",
+        Callback = function()
+            local success, err = pcall(function()
+                local TutorialList = require(ReplicatedStorage.Shared.List.Tutorial)
+                local function forceCompleteCheck()
+                    return true
+                end
+
+                local hookedCount = 0
+                for i, stageData in ipairs(TutorialList) do
+                    if type(stageData) == "table" and type(stageData.stageIsCompleted) == "function" then
+                        stageData.stageIsCompleted = forceCompleteCheck
+                        hookedCount = hookedCount + 1
+                    end
+                end
+            end)
         end
     })
 
@@ -4397,10 +4394,10 @@ task.spawn(function()
         Tree = Window:AddTab({ Title = "Axe/Tree", Icon = "phosphor-tree-evergreen-duotone" }),
         Farm = Window:AddTab({ Title = "Farming", Icon = "phosphor-farm-bold" }),
         Pet = Window:AddTab({ Title = "Pet Crafting", Icon = "paw-print" }),
-        Quest = Window:AddTab({ Title = "Quests", Icon = "phosphor-scroll-bold" }),
         Machine = Window:AddTab({ Title = "Machines/Minigames", Icon = "phosphor-game-controller-bold" }),
         Dunegon = Window:AddTab({ Title = "Dungeon", Icon = "phosphor-shield-checkered-bold" }),
         Craft = Window:AddTab({ Title = "Building", Icon = "hammer" }),
+        Quest = Window:AddTab({ Title = "Quests", Icon = "phosphor-scroll-bold" }),
         Claim = Window:AddTab({ Title = "Auto Claim/Collect", Icon = "gift" }),
         Misc = Window:AddTab({ Title = "Misc", Icon = "sparkles" }),
     }
