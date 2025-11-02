@@ -4078,7 +4078,97 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         end
     })
     
+local PetArchiverSection = Tabs.Misc:AddSection("Pet Archiver")
 
+    local petsToKeepInput = PetArchiverSection:AddInput("PetsToKeepInput", {
+        Title = "Number of best Pets to KEEP",
+        Default = "20",
+        Numeric = true,
+        Description = "Keeps your strongest pets."
+    })
+
+    local keepSpecialToggle = PetArchiverSection:AddToggle("KeepSpecialPetsToggle", {
+        Title = "Keep Event Pets",
+        Description = "Keep pets with an event boost.",
+        Default = true
+    })
+
+    PetArchiverSection:AddButton({
+        Title = "Archive Unwanted Pets",
+        Description = "This will never archive a pet which has a % bonus. This will archive all pets, other then equipped pets, your strongest pets, and event pets (if selected).",
+        Callback = function()
+            local numToKeep = tonumber(petsToKeepInput.Value) or 20
+            local shouldKeepPercentBonus = keepSpecialToggle.Value
+            
+            local playerData = DataController:getData()
+            local PetDefinitions = require(ReplicatedStorage.Shared.List.Pets.Pets)
+            
+            if not playerData or not playerData.inventory or not playerData.inventory.pet then
+                warn("Pet Archiver: Could not load pet inventory data.")
+                return
+            end
+
+            local allPetsMasterList = {}
+            pcall(function()
+                for petId, petRawData in pairs(playerData.inventory.pet) do
+                    local petObject = Util.itemUtils.createItemFromData(petRawData)
+                    if petObject then
+                        table.insert(allPetsMasterList, {
+                            id = petId,
+                            name = petObject:getName(),
+                            multiplier = petObject:getMultiplier()
+                        })
+                    end
+                end
+            end)
+            table.sort(allPetsMasterList, function(a, b) return a.multiplier > b.multiplier end)
+
+            local petsToKeepIds = {}
+
+            -- Rule 1: Keep Top N pets
+            for i = 1, math.min(numToKeep, #allPetsMasterList) do
+                petsToKeepIds[allPetsMasterList[i].id] = true
+            end
+
+            -- Rule 2: Keep ALL equipped pets
+            if playerData.equippedPets then
+                for petId, _ in pairs(playerData.equippedPets) do
+                    petsToKeepIds[petId] = true
+                end
+            end
+            
+            -- Rule 3 & 4: Keep special bonus pets
+            for _, petData in ipairs(allPetsMasterList) do
+                local petDef = PetDefinitions[petData.name]
+                if petDef then
+                    -- ALWAYS keep pets with the dynamic 'special' key
+                    if petDef.special then
+                        petsToKeepIds[petData.id] = true
+                    end
+                    -- CONDITIONALLY keep pets with the 'specialMultiplier' key
+                    if petDef.specialMultiplier and shouldKeepPercentBonus then
+                        petsToKeepIds[petData.id] = true
+                    end
+                end
+            end
+
+            local petsToArchiveIds = {}
+            for petId, _ in pairs(playerData.inventory.pet) do
+                if not petsToKeepIds[petId] then
+                    petsToArchiveIds[petId] = true
+                end
+            end
+
+            if next(petsToArchiveIds) then
+                pcall(function()
+                    PetService:archivePets(petsToArchiveIds, 1)
+                end)
+                print(string.format("Archiver: Sent %d pets to the archive.", table.getn(petsToArchiveIds)))
+            else
+                print("Archiver: No pets to archive based on your rules.")
+            end
+        end
+    })
     EventSection = Tabs.Misc:AddSection("Events")
     isAutoBreakingMeteors = false
     EventSection:Toggle("AutoBreakMeteors", { Title = "Auto Break Meteors (Infinite Range)", Default = false,
