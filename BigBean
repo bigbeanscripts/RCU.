@@ -3739,7 +3739,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         while true do
             if isAutoClaimAllChestsEnabled then
                 pcall(function()
-                    for chestId, chestData in pairs(Chests) do.
+                    for chestId, chestData in pairs(Chests) do
                         RewardService:claimChest(chestId)
                         task.wait(0.2)
                     end
