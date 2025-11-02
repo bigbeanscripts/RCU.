@@ -53,7 +53,7 @@ BuildUI = function()
             for _, eggModel in ipairs(eggFolder:GetChildren()) do table.insert(halloweenEggOptions, eggModel.Name) end
         end
     end)
-    table.insert(halloweenEggOptions, "Halloween (Boss)")
+    table.insert(halloweenEggOptions, "Spooky (Boss)")
     
     local selectedHalloweenEgg = halloweenEggOptions[1] or "Basic"
 
@@ -79,7 +79,7 @@ BuildUI = function()
     local useHalloweenLuckyEggs = false
     HalloweenHatchSection:Toggle("UseHalloweenLuckyEggs", {
         Title = "Use Lucky Eggs",
-        Description = "Does not apply to the 'Halloween (Boss)' egg.",
+        Description = "Does not apply to the 'Spooky (Boss)' egg.",
         Default = false,
         Callback = function(enabled) useHalloweenLuckyEggs = enabled end
     })
@@ -110,8 +110,8 @@ BuildUI = function()
                 autoHalloweenHatchThread = task.spawn(function()
                     while enabled do
                         pcall(function()
-                            if selectedHalloweenEgg == "Halloween (Boss)" then
-                                Knit.GetService("EggService").openEgg._re:FireServer("Halloween", selectedHalloweenAmount, {isBossCave = true})
+                            if selectedHalloweenEgg == "Spooky (Boss)" then
+                                Knit.GetService("EggService").openEgg._re:FireServer("Spooky", selectedHalloweenAmount, {isBossCave = true})
                             else
                                 local args = {selectedHalloweenEgg, selectedHalloweenAmount}
                                 if useHalloweenLuckyEggs then
