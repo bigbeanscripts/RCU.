@@ -812,6 +812,44 @@ BuildUI = function()
         end
     })
 
+    local HalloweenWheelSection = Tabs.Halloween:AddSection("Halloween Wheel")
+
+    local selectedWheelTier = 1 -- Default to tier 1
+
+    HalloweenWheelSection:Dropdown("SelectWheelTier", {
+        Title = "Select Tier",
+        Values = {1, 2, 3, 4},
+        Default = selectedWheelTier,
+        Callback = function(value)
+            selectedWheelTier = value
+        end
+    })
+
+    local autoSpinThread = nil
+    HalloweenWheelSection:Toggle("AutoSpinWheel", {
+        Title = "Auto Spin Wheel",
+        Default = false,
+        Callback = function(enabled)
+            if autoSpinThread then
+                task.cancel(autoSpinThread)
+                autoSpinThread = nil
+            end
+
+            if enabled then
+                autoSpinThread = task.spawn(function()
+                    -- Loops while the toggle is enabled
+                    while enabled do
+                        pcall(function()
+                            -- Fires the remote event with the tier selected from the dropdown
+                            Knit.GetService("HalloweenService"):halloweenWheelSpin(selectedWheelTier)
+                        end)
+                        task.wait(0.5) -- Waits 0.5 seconds before spinning again
+                    end
+                end)
+            end
+        end
+    })
+
     local HalloweenRebirthSection = Tabs.Halloween:AddSection("Halloween Rebirth")
 
     local autoRebirthThread, originalAutoHitSettings = nil, nil
