@@ -1345,7 +1345,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
     local claimFarmOptions, claimFarmIdMap = getAllFarmsForClaim()
 
     local claimDropdown = AutoClaimSection:Dropdown("SelectFarmsToClaim", {Title = "Select Farms to Auto-Claim", Values = claimFarmOptions, Multi = true, Default = {}})
-    local AutoClaimFarm = AutoClaimSection:Toggle("AutoClaimFarms", {Title = "Auto Claim Farms" , Description = "Attempts to claim selected farms every 10 seconds.", Default = false, Callback = function(s) _G.AutoClaimFarms = s end})
+    local AutoClaimFarm = AutoClaimSection:Toggle("AutoClaimFarms", {Title = "Auto Claim Farms" , Description = "Automatically claims fruits from selected farms.", Default = false, Callback = function(s) _G.AutoClaimFarms = s end})
 
     -- This function is no longer needed but kept to avoid breaking other references if any.
     isFarmReady = function() return false end
@@ -3722,36 +3722,33 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
     })
 
 
-    autoClaimAllChestsThread, originalIsInGroup = nil, nil
-    ClaimSection:Toggle("AutoClaimAllChests", { Title = "Auto Claim All Chests", Default = false,
+    local isAutoClaimAllChestsEnabled = false
+
+    local AutoClaimAllChests = ClaimSection:Toggle("AutoClaimAllChests", { 
+        Title = "Auto Claim All Chests", 
+        Default = false,
         Callback = function(enabled)
-            if enabled then
-                if not originalIsInGroup then originalIsInGroup = Functions.isInGroup end
-                Functions.isInGroup = function() return true end
-                if autoClaimAllChestsThread then task.cancel(autoClaimAllChestsThread) end
-                autoClaimAllChestsThread = task.spawn(function()
-                    DataController:waitForData()
-                    local Chests = require(ReplicatedStorage.Shared.List.Chests)
-                    while enabled do
-                        local playerData = DataController:getData()
-                        local serverTime = Knit.serverTimeNow or os.time()
-                        for chestId, chestData in pairs(Chests) do
-                            local lastClaim = playerData.chests[chestId] or 0
-                            local cooldown = chestData.cooldown - Values.chestCooldown(LocalPlayer, playerData)
-                            if cooldown - (serverTime - lastClaim) <= 0 then
-                                RewardService:claimChest(chestId, true); task.wait(0.2)
-                            end
-                        end
-                        task.wait(10)
-                    end
-                end)
-            else
-                if autoClaimAllChestsThread then task.cancel(autoClaimAllChestsThread); autoClaimAllChestsThread=nil end
-                if originalIsInGroup then Functions.isInGroup = originalIsInGroup; originalIsInGroup=nil end
-            end
+            isAutoClaimAllChestsEnabled = enabled
         end
     })
 
+    task.spawn(function()
+        DataController:waitForData()
+        local Chests = require(ReplicatedStorage.Shared.List.Chests)
+
+        while true do
+            if isAutoClaimAllChestsEnabled then
+                pcall(function()
+                    for chestId, chestData in pairs(Chests) do.
+                        RewardService:claimChest(chestId)
+                        task.wait(0.2)
+                    end
+                end)
+            end
+            task.wait(10)
+        end
+    end)
+    
     supplyDropThread = nil
     ClaimSection:Toggle("OpenSupplyDrops", { Title = "Open Supply Drops", Default = false,
         Callback = function(enabled)
