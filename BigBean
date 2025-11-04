@@ -366,7 +366,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
 
     local InstructionsParagraph = AutoIndexSection:Paragraph("AutoIndexInstructions", {
         Title = "Instructions",
-        Content = "Select variants to index. Then, either select specific eggs to target or leave the egg dropdown empty to cycle through all eggs in order.",
+        Content = "Select pet variants to index. Eggs must be unlocked to work, so don't select an egg you haven't unlocked yet. Eggs that require being built WILL work, even without building them.",
         TitleAlignment = "Middle"
     })
 
