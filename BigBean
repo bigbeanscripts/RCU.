@@ -382,12 +382,10 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
     local TIER_NAMES = { "Normal", "Golden", "Toxic", "Galaxy" }
     for tierIndex, tierName in ipairs(TIER_NAMES) do
         table.insert(VARIANT_OPTIONS, { Name = tierName, Tier = tierIndex, Shiny = false, RarityGroup = "STANDARD" })
-        table.insert(VARIANT_OPTIONS, { Name = "Shiny " .. tierName, Tier = tierIndex, Shiny = true, RarityGroup = "STANDARD" })
     end
     for _, rarityGroup in ipairs({"Eternal", "Secret"}) do
         for tierIndex, tierName in ipairs(TIER_NAMES) do
             table.insert(VARIANT_OPTIONS, { Name = tierName .. " " .. rarityGroup, Tier = tierIndex, Shiny = false, RarityGroup = rarityGroup })
-            table.insert(VARIANT_OPTIONS, { Name = "Shiny " .. tierName .. " " .. rarityGroup, Tier = tierIndex, Shiny = true, RarityGroup = rarityGroup })
         end
     end
     local variantDisplayNames = {}
@@ -532,7 +530,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
                         end
                         
 
-                        if not autoIndexRunning then break end -- Exit if toggled off during the loop
+                        if not autoIndexRunning then break end
                         AutoIndexStatusParagraph:SetValue("Cycle complete. Re-checking in 5 seconds...")
                         task.wait(5)
                     end
