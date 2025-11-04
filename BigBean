@@ -362,7 +362,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
     })
 
 
-local AutoIndexSection = Tabs.Eggs:AddSection("Index")
+    local AutoIndexSection = Tabs.Eggs:AddSection("Index")
 
     local InstructionsParagraph = AutoIndexSection:Paragraph("AutoIndexInstructions", {
         Title = "Instructions",
@@ -379,12 +379,10 @@ local AutoIndexSection = Tabs.Eggs:AddSection("Index")
     local TIER_NAMES = { "Normal", "Golden", "Toxic", "Galaxy" }
     for tierIndex, tierName in ipairs(TIER_NAMES) do
         table.insert(VARIANT_OPTIONS, { Name = tierName, Tier = tierIndex, Shiny = false, RarityGroup = "STANDARD" })
-        table.insert(VARIANT_OPTIONS, { Name = "Shiny " .. tierName, Tier = tierIndex, Shiny = true, RarityGroup = "STANDARD" })
     end
     for _, rarityGroup in ipairs({"Eternal", "Secret"}) do
         for tierIndex, tierName in ipairs(TIER_NAMES) do
             table.insert(VARIANT_OPTIONS, { Name = tierName .. " " .. rarityGroup, Tier = tierIndex, Shiny = false, RarityGroup = rarityGroup })
-            table.insert(VARIANT_OPTIONS, { Name = "Shiny " .. tierName .. " " .. rarityGroup, Tier = tierIndex, Shiny = true, RarityGroup = rarityGroup })
         end
     end
     local variantDisplayNames = {}
@@ -421,20 +419,32 @@ local AutoIndexSection = Tabs.Eggs:AddSection("Index")
 
             if enabled then
                 originalSettings = { egg = EggDropdown.Value, amount = HatchAmount.Value, autoHatch = AutoHatch.Value }
-                
+
                 autoIndexThread = task.spawn(function()
+                    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+                    local Knit = require(ReplicatedStorage.Packages.Knit)
+
+                    -- Required modules
                     local EggsModule = require(ReplicatedStorage.Shared.List.Pets.Eggs)
                     local Pets = require(ReplicatedStorage.Shared.List.Pets.Pets)
                     local Tiers = require(ReplicatedStorage.Shared.List.Pets.Tiers)
-                    
+                    local EggUtils = require(ReplicatedStorage.Shared.Util.EggUtils)
+                    local Currencies = require(ReplicatedStorage.Shared.List.Items.Currencies)
+                    local Functions = require(ReplicatedStorage.Shared.Functions)
+                    local DataController = Knit.GetController("DataController")
+
                     local allEggs = {}
-                    for name, data in pairs(EggsModule) do if data.pets and not name:find("Exclusive") then table.insert(allEggs, { Name = name, Data = data }) end end
+                    for name, data in pairs(EggsModule) do 
+                        if data.pets and not name:find("Exclusive") then 
+                            table.insert(allEggs, { Name = name, Data = data }) 
+                        end 
+                    end
                     table.sort(allEggs, function(a, b) return (a.Data.requiredMap or 0) < (b.Data.requiredMap or 0) end)
 
                     for _, eggInfo in ipairs(allEggs) do
                         if not autoIndexRunning then break end
                         local currentEggName, currentEggData = eggInfo.Name, eggInfo.Data
-                        
+
                         while autoIndexRunning do
                             local playerData = DataController:getData()
                             if not playerData then task.wait(1); continue end
@@ -463,12 +473,12 @@ local AutoIndexSection = Tabs.Eggs:AddSection("Index")
                                     if selectedVariants[variant.Name] then
                                         local rarityMatch = (variant.RarityGroup == "STANDARD" and petDef.rarity ~= "Eternal" and petDef.rarity ~= "Secret") or (variant.RarityGroup == petDef.rarity)
                                         if rarityMatch then
-                                            local isMissing = true
                                             local descriptor = petName:lower():gsub(" ","") .. ":" .. variant.Tier .. (variant.Shiny and ":s" or "")
-                                            if playerIndex[descriptor] then isMissing = false end
-                                            if isMissing then
+                                            if not playerIndex[descriptor] then
                                                 table.insert(goals, variant.Name .. " " .. petName)
-                                                if variant.Tier and variant.Tier > 1 then needsToCraft[petName .. ":" .. (variant.Tier - 1) .. (variant.Shiny and ":s" or "")] = true end
+                                                if variant.Tier and variant.Tier > 1 then
+                                                    needsToCraft[petName .. ":" .. (variant.Tier - 1) .. (variant.Shiny and ":s" or "")] = true
+                                                end
                                             end
                                         end
                                     end
@@ -477,51 +487,86 @@ local AutoIndexSection = Tabs.Eggs:AddSection("Index")
 
                             if #goals == 0 then
                                 AutoIndexStatusParagraph:SetValue(string.format("Egg '%s' complete! Moving to next...", currentEggName))
-                                task.wait(2); break
+                                task.wait(2)
+                                break
                             end
-                            
+
+                            local uniqueCurrencies = {}
+                            for eggName, eggData in pairs(EggsModule) do
+                                if eggData.cost then
+                                    local currencyId = EggUtils.getCurrency(eggName)
+                                    uniqueCurrencies[currencyId] = true
+                                end
+                            end
+
+                            local sortedCurrencyIds = {}
+                            for id, _ in pairs(uniqueCurrencies) do
+                                table.insert(sortedCurrencyIds, id)
+                            end
+                            table.sort(sortedCurrencyIds)
+
+                            for _, currencyId in ipairs(sortedCurrencyIds) do
+                                local currencyName = (Currencies[currencyId] and Currencies[currencyId].name) or currencyId
+                                local balance = EggUtils.getDataCurrency(playerData, currencyId) or 0
+                            end
+
                             AutoIndexStatusParagraph:SetValue(string.format("Working on Egg: %s\nIndexing: %s", currentEggName, table.concat(goals, ", ")))
-                            
-                            local petOptions = getPlayerPetOptions(); task.wait(2)
+
+                            local petOptions = getPlayerPetOptions()
+                            task.wait(2)
 
                             local shouldCraftNow = false
                             for displayName, petId in pairs(petDisplayToId) do
                                 local petRawData = petId and playerData.inventory.pet[petId]
                                 if petRawData and (petRawData.am or 0) >= 5 and needsToCraft[petRawData.nm .. ":" .. petRawData.ti .. (petRawData.sh and ":s" or "")] then
-                                    ownedForCrafting[displayName] = true; shouldCraftNow = true
+                                    ownedForCrafting[displayName] = true
+                                    shouldCraftNow = true
                                 end
                             end
 
                             if shouldCraftNow then
                                 local validCrafts = {}
-                                for dn, _ in pairs(ownedForCrafting) do if table.find(petOptions, dn) then validCrafts[dn] = true end end
-                                
+                                for dn, _ in pairs(ownedForCrafting) do 
+                                    if table.find(petOptions, dn) then 
+                                        validCrafts[dn] = true 
+                                    end 
+                                end
                                 if next(validCrafts) then
                                     PetDropdown:SetValue(validCrafts)
                                     for displayName, _ in pairs(validCrafts) do
                                         if not autoIndexRunning then break end
                                         local petId = petDisplayToId[displayName]
-                                        if petId then PetService:craft({[1]=petId}, false, 1); task.wait(0.5) end
+                                        if petId then 
+                                            PetService:craft({[1] = petId}, false, 1)
+                                            task.wait(0.5)
+                                        end
                                     end
                                 end
                             end
-                            
+
+                            -- Check affordability
                             local currency = EggUtils.getCurrency(currentEggName) or "clicks"
                             local balance = EggUtils.getDataCurrency(playerData, currency) or 0
                             local isAffordable = balance >= (currentEggData.cost or 0)
 
                             if isAffordable then
                                 if EggDropdown.Value ~= currentEggName or not AutoHatch.Value then
-                                    for _, eggOption in ipairs(eggOptions) do if displayToEggName[eggOption] == currentEggName then EggDropdown:SetValue(eggOption, false); break end end
+                                    for _, eggOption in ipairs(eggOptions) do
+                                        if displayToEggName[eggOption] == currentEggName then
+                                            EggDropdown:SetValue(eggOption, false)
+                                            break
+                                        end
+                                    end
                                     HatchAmount:SetValue("Max", false)
                                     AutoHatch:SetValue(true, false)
                                 end
                             else
                                 if AutoHatch.Value then AutoHatch:SetValue(false, false) end
                                 AutoIndexStatusParagraph:SetValue(string.format("Not enough %s for '%s'. Skipping...", currency, currentEggName))
-                                task.wait(2); break
+                                task.wait(2)
+                                break
                             end
-                            
+
                             task.wait(5)
                         end
                     end
@@ -540,6 +585,7 @@ local AutoIndexSection = Tabs.Eggs:AddSection("Index")
             end
         end
     })
+
 
 
     local TreeSection = Tabs.Tree:AddSection("Auto Break Trees")
