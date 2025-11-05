@@ -4097,6 +4097,132 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         end
     end})
 
+    
+    local UseItemsSection = Tabs.Misc:AddSection("Use Items")
+
+    local autoUseThreads = {}
+
+    local function createItemUsageUI(parentSection, moduleName)
+        -- Configuration map
+        local config = {
+            Potions = { invKey = "potion", displayName = "Potions" },
+            Fruits = { invKey = "fruit", displayName = "Fruits" },
+            Smoothies = { invKey = "smoothie", displayName = "Smoothies" },
+            ActiveEvents = { invKey = "activeEvent", displayName = "Stars" }
+        }
+        
+        local moduleConfig = config[moduleName]
+        if not moduleConfig then return end
+
+        local itemsFolder = ReplicatedStorage:FindFirstChild("Shared", true):FindFirstChild("List", true):FindFirstChild("Items", true)
+        if not itemsFolder then return end
+
+        local itemModule = itemsFolder:FindFirstChild(moduleName)
+        if not itemModule then return end
+
+        local success, rawItemData = pcall(require, itemModule)
+        if not success or type(rawItemData) ~= "table" then
+            warn("Could not load or parse item module:", moduleName)
+            return
+        end
+
+        -- Create comprehensive lookup tables
+        local itemNames, idToData = {}, {}
+        for id, data in pairs(rawItemData) do
+            if data and data.name then
+                table.insert(itemNames, data.name)
+                idToData[id] = data
+            end
+        end
+        table.sort(itemNames)
+
+        local dropdown = parentSection:Dropdown("AutoUseDropdown_" .. moduleName, {
+            Title = "Select " .. moduleConfig.displayName,
+            Values = itemNames,
+            Multi = true, Searchable = true, Default = {}
+        })
+
+        parentSection:Toggle("AutoUseToggle_" .. moduleName, {
+            Title = "Auto Use " .. moduleConfig.displayName,
+            Description = "Automatically uses the next selected item from the list above once the current one's effect expires.",
+            Default = false,
+            Callback = function(enabled)
+                local thread = autoUseThreads[moduleName]
+
+                if not enabled and thread then
+                    task.cancel(thread)
+                    autoUseThreads[moduleName] = nil
+                    return
+                end
+
+                if enabled and not thread then                    
+                    local function checkAndUseItems()
+                        local success, err = pcall(function()
+                            local playerData = DataController:getData()
+                            if not (playerData and playerData.inventory and playerData.inventory[moduleConfig.invKey] and playerData.activeBoosts) then return end
+
+                            local selectedItemNames = dropdown.Value or {}
+                            if not next(selectedItemNames) then return end
+
+                            -- == GATHER PHASE: Find all inactive items we need to use ==
+                            local itemsToUse = {}
+                            for itemName, isSelected in pairs(selectedItemNames) do
+                                if isSelected then
+                                    local internalId = nil
+                                    for id, data in pairs(idToData) do
+                                        if data.name == itemName then
+                                            internalId = id
+                                            break
+                                        end
+                                    end
+
+                                    if internalId then
+                                        local isActive = playerData.activeBoosts[internalId] and tonumber(playerData.activeBoosts[internalId]) > 0
+                                        
+                                        if not isActive then
+                                            -- This item is inactive and selected. Find it in inventory.
+                                            for invId, itemData in pairs(playerData.inventory[moduleConfig.invKey]) do
+                                                if itemData.nm == internalId and (itemData.am or 0) > 0 then
+                                                    table.insert(itemsToUse, { name = itemName, invId = invId })
+                                                    break -- Found it, move to the next selected item
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+
+                            if #itemsToUse > 0 then
+                                for _, itemInfo in ipairs(itemsToUse) do
+                                    InventoryService:useItem(itemInfo.invId, "1")
+                                    task.wait(0.2) -- Delay between each firing
+                                end
+                            else
+                            end
+                        end)
+                        if not success then warn("ERROR in Auto-Use check for "..moduleConfig.displayName..": "..tostring(err)) end
+                    end
+
+                    -- INSTANT CHECK when toggled on
+                    checkAndUseItems()
+
+                    -- Start the main loop
+                    autoUseThreads[moduleName] = task.spawn(function()
+                        while task.wait(5) do
+                            checkAndUseItems()
+                        end
+                        autoUseThreads[moduleName] = nil
+                    end)
+                end
+            end
+        })
+    end
+
+    -- Call the helper function to build the UI for each item type
+    createItemUsageUI(UseItemsSection, "Potions")
+    createItemUsageUI(UseItemsSection, "Fruits")
+    createItemUsageUI(UseItemsSection, "Smoothies")
+    createItemUsageUI(UseItemsSection, "ActiveEvents")
 
     PassSection = Tabs.Misc:AddSection("Season Pass")
     PassSection:Toggle("AutoClaimToggle", { Title = "Auto Claim Season Rewards", Description = "Automatically claims all available season pass rewards.", Default = false, Callback = function(s) _G.AutoClaimToggle = s end })
