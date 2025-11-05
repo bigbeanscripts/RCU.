@@ -78,15 +78,17 @@ BuildUI = function()
 
     local ClickSection = Tabs.Main:AddSection("Auto Click")
 
-    local AutoClick =ClickSection:Toggle("AutoClick", {
+    local isMainAutoClicking = false 
+    
+    local AutoClick = ClickSection:Toggle("AutoClick", {
         Title = "Auto Click",
         Description = "Automatically clicks for you - Extremely fast!",
         Default = false,
         Callback = function(Value)
-            AutoClicking = Value
+            isMainAutoClicking = Value 
             if Value then
                 task.spawn(function()
-                    while AutoClicking do
+                    while isMainAutoClicking do 
                         ClickService.click._re:FireServer()
                         task.wait(0.001)
                     end
@@ -95,7 +97,7 @@ BuildUI = function()
         end
     })
 
-local RebirthSection = Tabs.Main:AddSection("Rebirths")
+    local RebirthSection = Tabs.Main:AddSection("Rebirths")
 
     local selectedRebirthIndex = "Max Unlocked"
     local rebirthDropdown
