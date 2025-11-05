@@ -4226,6 +4226,122 @@ BuildUI = function()
     createItemUsageUI(UseItemsSection, "Smoothies")
     createItemUsageUI(UseItemsSection, "ActiveEvents")
 
+    local TotemsSection = Tabs.Misc:AddSection("Auto Use Totems")
+
+    local mapNames, mapNameToId = {}, {}
+    pcall(function()
+        local MapsModule = require(ReplicatedStorage.Shared.List.Maps)
+        local mapsList = {}
+        for id, data in pairs(MapsModule) do table.insert(mapsList, {id = tonumber(id), name = data.name}) end
+        table.sort(mapsList, function(a, b) return a.id < b.id end)
+        for _, mapInfo in ipairs(mapsList) do
+            table.insert(mapNames, mapInfo.name)
+            mapNameToId[mapInfo.name] = mapInfo.id
+        end
+    end)
+
+    -- Get all totems for the dropdown
+    local totemNames, totemNameToId = {}, {}
+    pcall(function()
+        local TotemsModule = require(ReplicatedStorage.Shared.List.Items.Totems)
+        for id, data in pairs(TotemsModule) do
+            table.insert(totemNames, data.name)
+            totemNameToId[data.name] = id
+        end
+        table.sort(totemNames)
+    end)
+
+    local selectedMapId = 1 
+    local selectedTotemId = totemNameToId[totemNames[1]] 
+    local autoUseTotemThread = nil
+
+    TotemsSection:Dropdown("SelectMapForTotem", {
+        Title = "Select Map",
+        Values = mapNames,
+        Default = mapNames[1] or "Spawn",
+        Searchable = true,
+        Multi = false,
+        Callback = function(mapName)
+            selectedMapId = mapNameToId[mapName]
+        end
+    })
+
+    TotemsSection:Dropdown("SelectTotemToUse", {
+        Title = "Select Totem",
+        Values = totemNames,
+        Default = totemNames[1],
+        Searchable = true,
+        Multi = false,
+        Callback = function(totemName)
+            selectedTotemId = totemNameToId[totemName]
+        end
+    })
+
+    -- 4. --- Toggle and Main Logic ---
+    TotemsSection:Toggle("AutoUseTotem", {
+        Title = "Auto Use",
+        Description = "Automatically places the selected totem in the selected map if one isn't already active there. It might visually be spawned on you, but the effect will apply to the selected map.",
+        Default = false,
+        Callback = function(enabled)
+            if not enabled and autoUseTotemThread then
+                task.cancel(autoUseTotemThread)
+                autoUseTotemThread = nil
+                return
+            end
+
+            if enabled and not autoUseTotemThread then
+                
+                local function checkAndUseTotem()
+                    pcall(function()
+                        local playerData = DataController:getData()
+                        local TotemController = Knit.GetController("TotemController")
+                        
+                        -- Check if a totem is already active in the selected map
+                        local isTotemActiveInMap = false
+                        for _, totemData in pairs(TotemController:getCurrentTotems()) do
+                            if totemData.mapId == selectedMapId then
+                                isTotemActiveInMap = true
+                                break
+                            end
+                        end
+                        
+                        if isTotemActiveInMap then
+                            return
+                        end
+                        
+                        -- Find the selected totem's UUID in the player's inventory
+                        local totemUUID = nil
+                        local hasTotem = false
+                        for uuid, itemData in pairs(playerData.inventory.totem or {}) do
+                            if itemData.nm == selectedTotemId then
+                                if (itemData.am or 0) > 0 then
+                                    totemUUID = uuid
+                                    hasTotem = true
+                                end
+                                break
+                            end
+                        end
+
+                        if hasTotem then
+                            InventoryService:useItem(totemUUID, {mapId = selectedMapId})
+                        end
+                    end)
+                end
+
+                -- Instant check when toggled on
+                checkAndUseTotem()
+
+                -- Start the main loop
+                autoUseTotemThread = task.spawn(function()
+                    while task.wait(5) do
+                        checkAndUseTotem()
+                    end
+                    autoUseTotemThread = nil
+                end)
+            end
+        end
+    })
+
     PassSection = Tabs.Misc:AddSection("Season Pass")
     PassSection:Toggle("AutoClaimToggle", { Title = "Auto Claim Season Rewards", Description = "Automatically claims all available season pass rewards.", Default = false, Callback = function(s) _G.AutoClaimToggle = s end })
     PassSection:Toggle("AutoResetPassToggle", { Title = "Auto Reset Season Pass", Description = "Automatically resets the pass AFTER all rewards have been claimed.", Default = false, Callback = function(s) _G.AutoResetPassToggle = s end })
