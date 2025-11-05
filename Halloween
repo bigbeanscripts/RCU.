@@ -26,15 +26,17 @@ BuildUI = function()
 
     local AutoClickSection = Tabs.Halloween:AddSection("Auto Click")
 
+    local isHalloweenAutoClicking = false 
+
     AutoClickSection:Toggle("AutoClick", {
         Title = "Auto Click",
         Description = "Automatically clicks for you - Extremely fast!",
         Default = false,
         Callback = function(Value)
-            AutoClicking = Value
+            isHalloweenAutoClicking = Value
             if Value then
                 task.spawn(function()
-                    while AutoClicking do
+                    while isHalloweenAutoClicking do 
                         ClickService.click._re:FireServer()
                         task.wait(0.001)
                     end
@@ -291,7 +293,7 @@ BuildUI = function()
                                 Knit.GetService("HalloweenService"):claimHalloweenReward()
                             end
                         end)
-                        task.wait(0.25)
+                        task.wait()
                     end
                 end)
             end
