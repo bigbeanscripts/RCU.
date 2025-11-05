@@ -83,10 +83,10 @@ BuildUI = function()
         Description = "Automatically clicks for you - Extremely fast!",
         Default = false,
         Callback = function(Value)
-            _G.AutoClicking = Value
+            AutoClicking = Value
             if Value then
                 task.spawn(function()
-                    while _G.AutoClicking do
+                    while AutoClicking do
                         ClickService.click._re:FireServer()
                         task.wait(0.001)
                     end
@@ -4097,7 +4097,7 @@ local RebirthSection = Tabs.Main:AddSection("Rebirths")
         end
     end})
 
-    
+
     local UseItemsSection = Tabs.Misc:AddSection("Use Items")
 
     local autoUseThreads = {}
