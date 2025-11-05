@@ -1566,7 +1566,7 @@ BuildUI = function()
     
     local CraftPetSection = Tabs.Pet:AddSection("Craft Pets")
     petDisplayToId = {}
-    local PetStatusParagraph = CraftPetSection:AddParagraph("PetCraftStatus", { Title = "Selected Pet Status", Content = "Select a pet to see details." })
+    local PetStatusParagraph = CraftPetSection:AddParagraph("PetCraftStatus", { Title = "Selected Pets", Content = "No pets selected." })
     
     getPlayerPetOptions = function()
         petDisplayToId = {}
@@ -1605,29 +1605,37 @@ BuildUI = function()
     end
 
     updatePetStatusParagraph = function(selectedPets)
-        if not selectedPets or next(selectedPets) == nil then PetStatusParagraph:SetContent("No pets selected."); return end
-        local playerData = DataController:getData()
-        if not (playerData and playerData.inventory and playerData.inventory.pet) then PetStatusParagraph:SetContent("Could not find pet inventory."); return end
         local contentLines = {}
-        for displayName, isSelected in pairs(selectedPets) do
-            if isSelected then
-                local petId = petDisplayToId[displayName]
-                if petId and playerData.inventory.pet[petId] then
-                    local petObject = Util.itemUtils.createItemFromData(playerData.inventory.pet[petId])
-                    if petObject then
-                        local _, amount = pcall(function() return petObject:getAmount() end)
-                        table.insert(contentLines, string.format("%s (Amount: %d) - ID: %s", displayName, amount or 0, petId))
-                    end
-                else table.insert(contentLines, string.format("%s (Amount: 0) - ID: %s", displayName, petId or "N/A")) end
+        if selectedPets and next(selectedPets) then
+            for displayName, isSelected in pairs(selectedPets) do
+                if isSelected then
+                    table.insert(contentLines, displayName)
+                end
             end
         end
-        PetStatusParagraph:SetContent(#contentLines == 0 and "No pets selected." or table.concat(contentLines, "\n"))
+
+        if #contentLines == 0 then
+            PetStatusParagraph:SetContent("No pets selected.")
+        else
+            PetStatusParagraph:SetContent(table.concat(contentLines, ", "))
+        end
     end
 
     local PetDropdown = CraftPetSection:AddDropdown("SelectPetToCraft", {
         Title = "Select Pet(s) to Craft", Values = getPlayerPetOptions(), Multi = true, Searchable = true, Default = {},
         Callback = function(value) updatePetStatusParagraph(value) end
     })
+
+    CraftPetSection:AddButton({
+    Title = "Select All Pets",
+    Callback = function()
+        local allPets = {}
+        for _, petName in ipairs(PetDropdown.Values) do
+            allPets[petName] = true
+        end
+        PetDropdown:SetValue(allPets)
+        updatePetStatusParagraph(allPets)
+    end})
 
     CraftPetSection:AddButton({ Title = "Refresh Pet List", Callback = function() PetDropdown:SetValues(getPlayerPetOptions()); PetDropdown:SetValue({}); updatePetStatusParagraph({}) end })
     CraftPetSection:AddParagraph("CraftingNote", { Title = "Note", Content = "Crafting requires at least 5 of the same pet to create 1 of the next tier. You might need to rejoin after trying to craft a galaxy pet, and be aware that the pet needs to be released after the space update in order to craft to galaxy." })
