@@ -1558,8 +1558,7 @@ BuildUI = function()
                     end
                 end)
             end
-            
-            -- FIX: The main 10-second wait is now here, controlling the frequency of the entire cycle.
+
             task.wait(10) 
         end
     end)
@@ -1567,14 +1566,16 @@ BuildUI = function()
     local CraftPetSection = Tabs.Pet:AddSection("Craft Pets")
     petDisplayToId = {}
     local PetStatusParagraph = CraftPetSection:AddParagraph("PetCraftStatus", { Title = "Selected Pets", Content = "No pets selected." })
-    
+        
     getPlayerPetOptions = function()
         petDisplayToId = {}
         local petOptions, addedNames = {}, {}
+
         pcall(function()
             local Tiers = require(ReplicatedStorage.Shared.List.Pets.Tiers)
             local playerData = DataController:getData()
             if not (playerData and playerData.inventory and playerData.inventory.pet) then return end
+
             for petId, petRawData in pairs(playerData.inventory.pet) do
                 local petObject = Util.itemUtils.createItemFromData(petRawData)
                 if petObject then
@@ -1583,23 +1584,35 @@ BuildUI = function()
                         local tierNum
                         local isShiny = (petRawData.sh == true)
                         pcall(function() tierNum = petObject:getTier() end)
-                        local tierName = (tierNum and Tiers[tierNum]) and Tiers[tierNum].name or ""
-                        if tierName == "Normal" then tierName = "" end
-                        local nameParts = {}
-                        if tierName ~= "" then table.insert(nameParts, tierName) end
-                        if isShiny then table.insert(nameParts, "Shiny") end
-                        table.insert(nameParts, name)
-                        local displayName = table.concat(nameParts, " ")
-                        if not addedNames[displayName] then
-                            table.insert(petOptions, displayName)
-                            petDisplayToId[displayName] = petId
-                            addedNames[displayName] = true
+
+                        local tierData = tierNum and Tiers[tierNum]
+                        local tierName = tierData and tierData.name or ""
+
+                        -- ✅ Skip Galaxy pets entirely
+                        if tierName ~= "Galaxy" then
+                            if tierName == "Normal" then tierName = "" end
+
+                            local nameParts = {}
+                            if tierName ~= "" then table.insert(nameParts, tierName) end
+                            if isShiny then table.insert(nameParts, "Shiny") end
+                            table.insert(nameParts, name)
+
+                            local displayName = table.concat(nameParts, " ")
+                            if not addedNames[displayName] then
+                                table.insert(petOptions, displayName)
+                                petDisplayToId[displayName] = petId
+                                addedNames[displayName] = true
+                            end
                         end
                     end
                 end
             end
         end)
-        if #petOptions == 0 then return {"No pets found"} end
+
+        if #petOptions == 0 then
+            return { "No pets found" }
+        end
+
         table.sort(petOptions)
         return petOptions
     end
@@ -1656,22 +1669,52 @@ BuildUI = function()
     })
 
     local CraftAllToggle = CraftPetSection:AddToggle("CraftAllToggle", { Title = "Craft All (Selected)", Default = false })
+
+    local craftAllThread = nil
+
     CraftAllToggle:OnChanged(function()
+        -- Cancel any existing thread if it's running.
+        if craftAllThread then
+            task.cancel(craftAllThread)
+            craftAllThread = nil
+        end
+
         if CraftAllToggle.Value then
-            task.spawn(function()
+            craftAllThread = task.spawn(function()
                 while CraftAllToggle.Value do
-                    local selectedPets, crafted = PetDropdown.Value, false
-                    if next(selectedPets) then
+                    local petsToCraft = {}
+                    local selectedPets = PetDropdown.Value
+                    local playerData = DataController:getData()
+                    
+                    if selectedPets and next(selectedPets) and playerData and playerData.inventory.pet then
                         for displayName, isSelected in pairs(selectedPets) do
-                            if isSelected and CraftAllToggle.Value then
+                            if isSelected then
                                 local petId = petDisplayToId[displayName]
-                                if petId then pcall(function() PetService:craft({[1]=petId}, true, 1) end); crafted=true; task.wait(0.5) end
+                                if petId and playerData.inventory.pet[petId] and (playerData.inventory.pet[petId].am or 0) >= 5 then
+                                    table.insert(petsToCraft, { id = petId, name = displayName })
+                                end
                             end
                         end
                     end
-                    if crafted then task.wait(1); PetDropdown:SetValues(getPlayerPetOptions()) end
-                    task.wait(1)
+
+                    if #petsToCraft > 0 then                        
+                        for _, petInfo in ipairs(petsToCraft) do
+                            if not CraftAllToggle.Value then 
+                                break 
+                            end
+                            
+                            pcall(function() 
+                                PetService:craft({[1] = petInfo.id}, true, 1) 
+                            end)
+                            task.wait(0.2)
+                        end
+                        task.wait(1)
+                        PetDropdown:SetValues(getPlayerPetOptions()) 
+                    end
+
+                    task.wait(3) 
                 end
+                craftAllThread = nil 
             end)
         end
     end)
